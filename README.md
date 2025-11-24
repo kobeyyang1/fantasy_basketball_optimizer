@@ -1,4 +1,4 @@
-# Your project name here
+# Fantasy Basketball Lineup Optimiser & Performance Predictor
 
 ## Information about this repository
 
