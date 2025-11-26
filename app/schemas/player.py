@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
+from typing import Dict, List
 
 
 class PlayerBase(BaseModel):
@@ -50,23 +51,33 @@ class PlayerStatsBase(BaseModel):
     turnovers: Optional[float] = None
 
 
-class PlayerStatsOut(PlayerStatsBase):
-    id: int
-    player_id: int
+class PlayerStatsOut(BaseModel):
+    fga: Optional[float] = None
+    fgm: Optional[float] = None
+    fg_pct: Optional[float] = None
+    fta: Optional[float] = None
+    ftm: Optional[float] = None
+    ft_pct: Optional[float] = None
+    three_pm: Optional[float] = None
+    points: Optional[float] = None
+    rebounds: Optional[float] = None
+    assists: Optional[float] = None
+    steals: Optional[float] = None
+    blocks: Optional[float] = None
+    turnovers: Optional[float] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True  # ✅ THIS is required for .from_orm()
 
 class PlayerWithStats(BaseModel):
     id: int
     name: str
     position: Optional[str] = None
     team_full_name: Optional[str] = None
-
     stats: Optional[PlayerStatsOut] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class PlayerRotoCategories(BaseModel):
@@ -88,3 +99,9 @@ class PlayerRoto(BaseModel):
 
     class Config:
         orm_mode = True
+
+class RotoZScoresOut(BaseModel):
+    z_scores: Dict[str, float]
+    total_score: float
+    player_id: int
+    player_name: str

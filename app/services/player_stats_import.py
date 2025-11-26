@@ -13,7 +13,7 @@ from app.models.player_stats import PlayerStats
 load_dotenv()
 
 API_KEY = os.getenv("BALLDONTLIE_API_KEY")
-BASE_URL = "https://api.balldontlie.io/v1/season_averages"
+BASE_URL = "https://api.balldontlie.io/nba/v1/season_averages/general"
 
 
 def fetch_season_averages_from_api(
@@ -32,9 +32,12 @@ def fetch_season_averages_from_api(
         )
 
     params = {
-        "season": season,
-        "player_ids[]": player_external_id,
+    "season": season,
+    "season_type": "regular",
+    "type": "base",
+    "player_ids[]": player_external_id,
     }
+
     headers = {
         # Same style as in players_import.py
         "Authorization": API_KEY,

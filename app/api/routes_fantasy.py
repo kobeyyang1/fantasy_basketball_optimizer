@@ -1,8 +1,9 @@
 # app/api/routes_fantasy.py
 
-from typing import List
+from typing import List, Dict
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from app.core.deps import get_db, get_current_user
 from app.fantasy.projections import project_player
@@ -10,6 +11,7 @@ from app.fantasy.projections import project_player
 from app.models.user import User
 from app.models.player import Player
 from app.models.player_stats import PlayerStats
+from app.services.roto_scoring import compute_roto_scores
 
 from app.schemas.player import (
     PlayerProjection,
@@ -21,6 +23,8 @@ from app.schemas.player import (
 
 router = APIRouter(tags=["fantasy"])
 
+
+# ---------- Existing endpoints ----------
 
 @router.get("/projections", response_model=List[PlayerProjection])
 def get_projections(
@@ -46,6 +50,41 @@ def get_projections(
     return result
 
 
+@router.get("/top_players", response_model=List[PlayerProjection])
+def get_top_players(
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return the top N players by projected fantasy points.
+    Uses the same project_player() function.
+    """
+
+    players = db.query(Player).all()
+    projections: List[PlayerProjection] = []
+
+    # Build projections for all players
+    for p in players:
+        projected_points = project_player(p)
+
+        projections.append(
+            PlayerProjection(
+                id=p.id,
+                name=p.name,
+                position=p.position,
+                team=getattr(p, "team", None),
+                projected_points=projected_points,
+            )
+        )
+
+    # Sort by projected_points descending
+    projections.sort(key=lambda x: x.projected_points or 0, reverse=True)
+
+    # Return only the top `limit`
+    return projections[:limit]
+
+
 @router.get("/players_with_stats", response_model=List[PlayerWithStats])
 def get_players_with_stats(
     db: Session = Depends(get_db),
@@ -59,7 +98,11 @@ def get_players_with_stats(
 
         stats_out = None
         if stats_obj is not None:
-            stats_out = PlayerStatsOut.from_orm(stats_obj)
+            try:
+                stats_out = PlayerStatsOut.from_orm(stats_obj)
+            except Exception as e:
+                print("WARN: couldn't serialize stats for player", p.id, e)
+                stats_out = None
 
         result.append(
             PlayerWithStats(
@@ -105,3 +148,235 @@ def get_player_roto(
         name=player.name,  # ✅ real column
         categories=categories,
     )
+
+
+@router.get("/roto_overview", response_model=List[PlayerRoto])
+def get_roto_overview(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return roto category averages for all players that have stats.
+    This is roto-focused: it exposes all category averages instead of a single projected points value.
+    """
+
+    players = db.query(Player).all()
+    result: List[PlayerRoto] = []
+
+    for p in players:
+        stats_obj: PlayerStats | None = p.stats
+        if not stats_obj:
+            # skip players with no stats imported
+            continue
+
+        categories = PlayerRotoCategories(
+            fg_pct=stats_obj.fg_pct,
+            ft_pct=stats_obj.ft_pct,
+            three_pm=stats_obj.three_pm,
+            points=stats_obj.points,
+            rebounds=stats_obj.rebounds,
+            assists=stats_obj.assists,
+            steals=stats_obj.steals,
+            blocks=stats_obj.blocks,
+            turnovers=stats_obj.turnovers,
+        )
+
+        result.append(
+            PlayerRoto(
+                id=p.id,
+                name=p.name,
+                categories=categories,
+            )
+        )
+
+    # Optional: sort by points descending so strongest scorers appear first
+    result.sort(key=lambda r: (r.categories.points or 0.0), reverse=True)
+
+    return result
+
+
+# ---------- Roto z-score models & endpoints ----------
+
+class RotoZScoresOut(BaseModel):
+    player_id: int
+    player_name: str
+    z_scores: Dict[str, float]
+    total_score: float
+    vor_score: float | None = None  # value over replacement
+
+
+@router.get("/roto_test", response_model=List[RotoZScoresOut])
+def get_roto_test(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Test endpoint to verify that the roto scoring engine works.
+    Uses a few hard-coded players with fake averages.
+    """
+
+    # 🔹 Dummy player data (just to test the roto engine)
+    players = [
+        {
+            "player_id": 1,
+            "player_name": "Player A",
+            "fg_pct": 0.50,
+            "ft_pct": 0.80,
+            "three_pm": 2.5,
+            "points": 24.0,
+            "rebounds": 8.0,
+            "assists": 5.0,
+            "steals": 1.2,
+            "blocks": 0.7,
+            "turnovers": 2.8,
+        },
+        {
+            "player_id": 2,
+            "player_name": "Player B",
+            "fg_pct": 0.46,
+            "ft_pct": 0.88,
+            "three_pm": 3.2,
+            "points": 21.0,
+            "rebounds": 4.0,
+            "assists": 7.0,
+            "steals": 0.9,
+            "blocks": 0.4,
+            "turnovers": 3.5,
+        },
+        {
+            "player_id": 3,
+            "player_name": "Player C",
+            "fg_pct": 0.52,
+            "ft_pct": 0.75,
+            "three_pm": 1.1,
+            "points": 18.0,
+            "rebounds": 10.0,
+            "assists": 3.0,
+            "steals": 0.8,
+            "blocks": 1.1,
+            "turnovers": 1.8,
+        },
+    ]
+
+    categories = [
+        "fg_pct",
+        "ft_pct",
+        "three_pm",
+        "points",
+        "rebounds",
+        "assists",
+        "steals",
+        "blocks",
+        "turnovers",
+    ]
+
+    results = compute_roto_scores(
+        players=players,
+        categories=categories,
+        inverted_categories=["turnovers"],
+    )
+
+    return [
+        {
+            "player_id": r.player_id,
+            "player_name": r.player_name,
+            "z_scores": r.z_scores,
+            "total_score": r.total_score,
+        }
+        for r in results
+    ]
+
+
+@router.get("/roto_rankings", response_model=List[RotoZScoresOut])
+def get_roto_rankings(
+    replacement_rank: int = 130,   # 👈 NEW: which rank is "replacement level"
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Standard 9-cat roto rankings based on actual PlayerStats from the database.
+
+    - Each category is equally weighted in the total z-score.
+    - Scarcity is handled naturally via z-scores (small std dev -> bigger impact).
+    - Also computes a simple Value Over Replacement (vor_score), where
+      "replacement" is defined as the player at `replacement_rank`.
+    """
+
+    players = db.query(Player).all()
+
+    player_dicts = []
+
+    for p in players:
+        stats: PlayerStats | None = p.stats
+        if not stats:
+            # Skip players with no stats imported
+            continue
+
+        player_dicts.append(
+            {
+                "player_id": p.id,
+                "player_name": p.name,
+                "fg_pct": stats.fg_pct,
+                "ft_pct": stats.ft_pct,
+                "three_pm": stats.three_pm,
+                "points": stats.points,
+                "rebounds": stats.rebounds,
+                "assists": stats.assists,
+                "steals": stats.steals,
+                "blocks": stats.blocks,
+                "turnovers": stats.turnovers,
+            }
+        )
+
+    if not player_dicts:
+        return []
+
+    categories = [
+        "fg_pct",
+        "ft_pct",
+        "three_pm",
+        "points",
+        "rebounds",
+        "assists",
+        "steals",
+        "blocks",
+        "turnovers",
+    ]
+
+    # 1) Get normal roto z-scores and total_score (already sorted by total_score)
+    results = compute_roto_scores(
+        players=player_dicts,
+        categories=categories,
+        inverted_categories=["turnovers"],  # turnovers hurt you
+    )
+
+    # 2) Determine replacement-level player index
+    #    (clamped to valid range)
+    if len(results) == 0:
+        return []
+
+    replacement_index = max(0, min(replacement_rank - 1, len(results) - 1))
+    replacement_player = results[replacement_index]
+    replacement_z = replacement_player.z_scores  # dict: cat -> z
+
+    # 3) Build response including VOR score per player
+    response: List[Dict[str, float]] = []
+
+    for r in results:
+        vor_total = 0.0
+
+        for cat in categories:
+            player_z = r.z_scores.get(cat, 0.0)
+            repl_z = replacement_z.get(cat, 0.0)
+            vor_total += (player_z - repl_z)
+
+        response.append(
+            {
+                "player_id": r.player_id,
+                "player_name": r.player_name,
+                "z_scores": r.z_scores,
+                "total_score": r.total_score,
+                "vor_score": vor_total,
+            }
+        )
+
+    return response

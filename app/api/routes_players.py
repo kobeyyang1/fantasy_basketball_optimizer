@@ -4,6 +4,7 @@ from typing import List
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.services.player_stats_nba import import_nba_stats
 from app.core.deps import get_db, get_current_user
 from app.models.player import Player
 from app.schemas.player import PlayerCreate, PlayerOut
@@ -51,12 +52,16 @@ def import_players(
 
 @router.post("/import_stats")
 def import_player_stats(
-    season: int = 2023,
+    season: str = "2023-24",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    imported_count = import_stats_for_all_players(db, season=season)
+    """
+    Import season stats for all players using nba_api instead of balldontlie.
+    """
+    imported_count = import_nba_stats(db, season)
     return {
         "season": season,
         "players_with_stats": imported_count,
     }
+
