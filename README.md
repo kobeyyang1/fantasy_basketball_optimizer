@@ -8,7 +8,6 @@ Regarding the use of this repository, once a feature (or part of it) is develope
 
 Please choose the structure of the contents of this repository that suits the needs of your project but do indicate in this file where the main software artefacts are located.
 
-
-Ctrl + C           # stop server if running
+Ctrl + C # stop server if running
 venv\Scripts\activate
 uvicorn app.main:app

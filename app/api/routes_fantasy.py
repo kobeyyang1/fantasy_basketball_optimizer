@@ -4,6 +4,7 @@ from typing import List, Dict
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from math import sqrt
 
 from app.core.deps import get_db, get_current_user
 from app.fantasy.projections import project_player
@@ -21,7 +22,15 @@ from app.schemas.player import (
     PlayerRotoCategories,
 )
 
+from app.db.session import SQLALCHEMY_DATABASE_URL
+print("🚨 FASTAPI USING DB:", SQLALCHEMY_DATABASE_URL)
+
+
 router = APIRouter(tags=["fantasy"])
+
+@router.get("/debug_db")
+def debug_db():
+    return {"db_url": SQLALCHEMY_DATABASE_URL}
 
 
 # ---------- Existing endpoints ----------
@@ -281,6 +290,7 @@ def get_roto_test(
             "player_name": r.player_name,
             "z_scores": r.z_scores,
             "total_score": r.total_score,
+            "vor_score": None,  # not meaningful in test
         }
         for r in results
     ]
@@ -288,17 +298,26 @@ def get_roto_test(
 
 @router.get("/roto_rankings", response_model=List[RotoZScoresOut])
 def get_roto_rankings(
-    replacement_rank: int = 130,   # 👈 NEW: which rank is "replacement level"
+    league_size: int | None = None,        # league size preset
+    replacement_rank: int | None = None,   # optional manual override
+    punt: str | None = None,               # comma-separated list of punted categories
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Standard 9-cat roto rankings based on actual PlayerStats from the database.
 
-    - Each category is equally weighted in the total z-score.
-    - Scarcity is handled naturally via z-scores (small std dev -> bigger impact).
-    - Also computes a simple Value Over Replacement (vor_score), where
-      "replacement" is defined as the player at `replacement_rank`.
+    - Each (non-punted) category is equally weighted in the total z-score.
+    - Scarcity is handled naturally via z-scores.
+    - Also computes a simple Value Over Replacement (vor_score).
+
+    Replacement level is chosen as:
+      1) If replacement_rank is provided -> use that directly.
+      2) Else if league_size is provided -> league_size * 11 (approx roster slots).
+      3) Else -> default to 130.
+
+    You can punt categories using the 'punt' query parameter, e.g.:
+      ?punt=ft_pct,turnovers
     """
 
     players = db.query(Player).all()
@@ -330,7 +349,8 @@ def get_roto_rankings(
     if not player_dicts:
         return []
 
-    categories = [
+    # All possible roto categories
+    all_categories = [
         "fg_pct",
         "ft_pct",
         "three_pm",
@@ -342,21 +362,41 @@ def get_roto_rankings(
         "turnovers",
     ]
 
-    # 1) Get normal roto z-scores and total_score (already sorted by total_score)
+    # Parse punt list (categories to ignore in scoring)
+    punted: list[str] = []
+    if punt:
+        punted = [c.strip() for c in punt.split(",") if c.strip()]
+
+    # Categories that will actually be used in scoring
+    categories = [c for c in all_categories if c not in punted]
+
+    if not categories:
+        # Safety: can't compute scores if you punt everything
+        raise HTTPException(status_code=400, detail="All categories are punted; nothing left to score.")
+
+    # 1) Get normal roto z-scores and total_score *for the chosen categories*
     results = compute_roto_scores(
         players=player_dicts,
         categories=categories,
-        inverted_categories=["turnovers"],  # turnovers hurt you
+        inverted_categories=["turnovers"],  # turnovers hurt you (if not punted)
     )
 
-    # 2) Determine replacement-level player index
-    #    (clamped to valid range)
     if len(results) == 0:
         return []
 
-    replacement_index = max(0, min(replacement_rank - 1, len(results) - 1))
+    # 2) Decide effective replacement_rank based on inputs
+    if replacement_rank is not None and replacement_rank > 0:
+        effective_replacement_rank = replacement_rank
+    elif league_size is not None and league_size > 0:
+        ROSTER_SLOTS_PER_TEAM = 11  # tweak this later if you want
+        effective_replacement_rank = league_size * ROSTER_SLOTS_PER_TEAM
+    else:
+        effective_replacement_rank = 130  # default if nothing provided
+
+    # Clamp to valid range
+    replacement_index = max(0, min(effective_replacement_rank - 1, len(results) - 1))
     replacement_player = results[replacement_index]
-    replacement_z = replacement_player.z_scores  # dict: cat -> z
+    replacement_z = replacement_player.z_scores  # dict: category -> z-score (for used categories)
 
     # 3) Build response including VOR score per player
     response: List[Dict[str, float]] = []
@@ -364,6 +404,7 @@ def get_roto_rankings(
     for r in results:
         vor_total = 0.0
 
+        # Only non-punted categories contribute to vor_score
         for cat in categories:
             player_z = r.z_scores.get(cat, 0.0)
             repl_z = replacement_z.get(cat, 0.0)
@@ -373,10 +414,143 @@ def get_roto_rankings(
             {
                 "player_id": r.player_id,
                 "player_name": r.player_name,
-                "z_scores": r.z_scores,
-                "total_score": r.total_score,
+                "z_scores": r.z_scores,        # only used categories
+                "total_score": r.total_score,   # sum over non-punted cats
                 "vor_score": vor_total,
             }
         )
 
     return response
+
+
+# ---------- Roto summary (league means/stds) ----------
+
+class RotoSummaryCategory(BaseModel):
+    mean: float
+    std: float
+    count: int
+
+
+class RotoSummaryOut(BaseModel):
+    categories: Dict[str, RotoSummaryCategory]
+
+
+@router.get("/roto_summary", response_model=RotoSummaryOut)
+def get_roto_summary(
+    punt: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return league-wide mean, standard deviation, and sample size for each roto category.
+    Respects 'punt' so you can match this to your punted build.
+    """
+
+    players = db.query(Player).all()
+
+    if not players:
+        return RotoSummaryOut(categories={})
+
+    # All possible roto categories
+    all_categories = [
+        "fg_pct",
+        "ft_pct",
+        "three_pm",
+        "points",
+        "rebounds",
+        "assists",
+        "steals",
+        "blocks",
+        "turnovers",
+    ]
+
+    # Parse punt list
+    punted: list[str] = []
+    if punt:
+        punted = [c.strip() for c in punt.split(",") if c.strip()]
+
+    categories = [c for c in all_categories if c not in punted]
+
+    if not categories:
+        raise HTTPException(status_code=400, detail="All categories are punted; nothing left to summarize.")
+
+    # Collect values per category
+    values_by_cat: Dict[str, List[float]] = {c: [] for c in categories}
+
+    for p in players:
+        stats: PlayerStats | None = p.stats
+        if not stats:
+            continue
+
+        for cat in categories:
+            v = getattr(stats, cat, None)
+            if v is not None:
+                values_by_cat[cat].append(float(v))
+
+    summary: Dict[str, RotoSummaryCategory] = {}
+
+    for cat in categories:
+        values = values_by_cat[cat]
+        n = len(values)
+        if n == 0:
+            mean = 0.0
+            std = 0.0
+        else:
+            mean = sum(values) / n
+            # population std-dev
+            variance = sum((v - mean) ** 2 for v in values) / n
+            std = sqrt(variance)
+
+        summary[cat] = RotoSummaryCategory(
+            mean=mean,
+            std=std,
+            count=n,
+        )
+
+    return RotoSummaryOut(categories=summary)
+
+@router.get("/debug_players", response_model=List[PlayerWithStats])
+def debug_players(
+    q: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Debug helper: return players (optionally filtered by name) with their stats.
+    If q is given, we filter in Python to avoid any SQL ilike weirdness.
+    """
+
+    # Get ALL players the API can see
+    players = db.query(Player).all()
+    print(f"[DEBUG] debug_players: total players in DB = {len(players)}")
+
+    result: List[PlayerWithStats] = []
+
+    for p in players:
+        # Optional substring filter in Python (case-insensitive)
+        if q:
+            if q.lower() not in (p.name or "").lower():
+                continue
+
+        stats_obj: PlayerStats | None = p.stats
+
+        stats_out = None
+        if stats_obj is not None:
+            try:
+                stats_out = PlayerStatsOut.from_orm(stats_obj)
+            except Exception as e:
+                print("WARN: couldn't serialize stats for player", p.id, e)
+                stats_out = None
+
+        result.append(
+            PlayerWithStats(
+                id=p.id,
+                name=p.name,
+                position=p.position,
+                team_full_name=getattr(p, "team", None),  # use 'team' from your model
+                stats=stats_out,
+            )
+        )
+
+    print(f"[DEBUG] debug_players: returning {len(result)} players (after filter q={q!r})")
+    return result
