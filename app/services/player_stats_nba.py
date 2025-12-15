@@ -9,34 +9,38 @@ from app.models.player_stats import PlayerStats
 
 def fetch_all_player_stats(season: str = "2023-24"):
     """
-    Fetch season averages for all players using nba_api.
+    Fetch season stats for all players using nba_api.
     Returns a pandas DataFrame.
     """
     stats = leaguedashplayerstats.LeagueDashPlayerStats(
         season=season,
-        season_type_all_star="Regular Season"
+        season_type_all_star="Regular Season",
+        per_mode_detailed="Totals",  # or "PerGame" if you prefer
     )
-    return stats.get_data_frames()[0]
+    df = stats.get_data_frames()[0]
+
+    # Optional: debug once
+    # print("[DEBUG] leaguedashplayerstats columns:", df.columns.tolist())
+
+    # Normalize name column
+    df["PLAYER_NAME"] = df["PLAYER_NAME"].str.strip().str.lower()
+    return df
 
 
 def import_nba_stats(db: Session, season: str = "2023-24") -> int:
     """
     Imports NBA player stats from nba_api and stores them in the PlayerStats table.
-    Matches players by name.
-    Returns the number of players successfully updated.
+    - Matches players by name.
+    - Fills stats (PTS, REB, AST, etc.)
+    - Also fills Player.position if available in the stats DF and not already set.
     """
 
     df = fetch_all_player_stats(season)
-
     imported_count = 0
-
-    # Convert to easier lookup
-    df["PLAYER_NAME"] = df["PLAYER_NAME"].str.strip().str.lower()
 
     players = db.query(Player).all()
 
     for p in players:
-        # match by name
         lookup_name = p.name.strip().lower()
         row = df[df["PLAYER_NAME"] == lookup_name]
 
@@ -45,12 +49,12 @@ def import_nba_stats(db: Session, season: str = "2023-24") -> int:
 
         row = row.iloc[0]
 
+        # ---- Fill stats ----
         stats = db.query(PlayerStats).filter(PlayerStats.player_id == p.id).first()
         if stats is None:
             stats = PlayerStats(player_id=p.id)
             db.add(stats)
 
-        # Assign stats
         stats.points = float(row["PTS"])
         stats.rebounds = float(row["REB"])
         stats.assists = float(row["AST"])
@@ -62,7 +66,27 @@ def import_nba_stats(db: Session, season: str = "2023-24") -> int:
         stats.ft_pct = float(row["FT_PCT"]) if row["FT_PCT"] is not None else None
         stats.three_pm = float(row["FG3M"]) if row["FG3M"] is not None else None
 
+        stats.fga = float(row["FGA"]) if row["FGA"] is not None else None
+        stats.fgm = float(row["FGM"]) if row["FGM"] is not None else None
+        stats.fta = float(row["FTA"]) if row["FTA"] is not None else None
+        stats.ftm = float(row["FTM"]) if row["FTM"] is not None else None
+
+        # ---- Fill Player.position (once) ----
+        if not p.position:
+            pos = None
+            # Different nba_api versions may use different column names;
+            # we check both defensively.
+            if "PLAYER_POSITION" in row.index and row["PLAYER_POSITION"]:
+                pos = str(row["PLAYER_POSITION"]).strip()
+            elif "POSITION" in row.index and row["POSITION"]:
+                pos = str(row["POSITION"]).strip()
+
+            if pos:
+                print(f"[INFO] Setting position for {p.name} -> {pos}")
+                p.position = pos
+
         imported_count += 1
 
     db.commit()
+    print(f"[INFO] Stats import complete, players updated: {imported_count}")
     return imported_count

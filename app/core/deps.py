@@ -51,3 +51,19 @@ def get_current_user(
         )
 
     return user
+
+def get_current_user_dev(
+    db: Session = Depends(get_db),
+) -> User:
+    """
+    DEV ONLY: always return the first user in the database.
+    If no user exists, you could optionally create one here.
+    """
+    user = db.query(User).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No users in DB. Create one via /users/register first.",
+        )
+    return user
+
