@@ -1,9 +1,9 @@
 # app/models/player.py
 
-from sqlalchemy import Column, Integer, String, Float
+from sqlalchemy import Column, Integer, String, Float, Boolean
 from sqlalchemy.orm import relationship
 
-from app.db.base import Base
+from app.db.base_class import Base
 
 
 class Player(Base):
@@ -19,12 +19,15 @@ class Player(Base):
     team = Column(String, nullable=True)
     position = Column(String, nullable=True)
     team_full_name = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
 
     # This will hold your fantasy projection later
     projected_points = Column(Float, nullable=True)
 
     # one-to-one relationship to stats (string name, no import here)
     stats = relationship("PlayerStats", back_populates="player", uselist=False)
+    season_stats = relationship("PlayerSeasonStats", back_populates="player")
+
 
 
 

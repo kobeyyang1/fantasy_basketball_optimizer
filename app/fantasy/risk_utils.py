@@ -1,0 +1,26 @@
+# app/fantasy/risk_utils.py
+
+import math
+from typing import List, Dict
+
+
+def z_score(values: List[float]) -> List[float]:
+    if not values:
+        return []
+
+    mean = sum(values) / len(values)
+    variance = sum((v - mean) ** 2 for v in values) / len(values)
+    std = math.sqrt(variance)
+
+    if std == 0:
+        return [0.0 for _ in values]
+
+    return [(v - mean) / std for v in values]
+
+
+def attach_risk_z(players: List[Dict]) -> None:
+    risk_vals = [p["risk_raw"] for p in players]
+    z_vals = z_score(risk_vals)
+
+    for p, z in zip(players, z_vals):
+        p["risk_z"] = float(z)

@@ -1,17 +1,24 @@
-# app/models/player_stats.py
+# app/models/player_season_stats.py
 
-from sqlalchemy import Column, Integer, Float, ForeignKey
+from sqlalchemy import Column, Integer, Float, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.db.base_class import Base
 
 
-class PlayerStats(Base):
-    __tablename__ = "player_stats"
+class PlayerSeasonStats(Base):
+    __tablename__ = "player_season_stats"
 
     id = Column(Integer, primary_key=True, index=True)
 
-    player_id = Column(Integer, ForeignKey("players.id"), unique=True, index=True)
+    # many seasons per player, so NOT unique
+    player_id = Column(Integer, ForeignKey("players.id"), index=True, nullable=False)
+
+    # e.g. "2023-24"
+    season = Column(String, index=True, nullable=False)
+
+    # games played (for your risk score)
+    gp = Column(Integer, nullable=False, default=0)
 
     # shooting
     fga = Column(Float, nullable=True)
@@ -33,5 +40,9 @@ class PlayerStats(Base):
     blocks = Column(Float, nullable=True)
     turnovers = Column(Float, nullable=True)
 
-    # back relationship to Player (string name again)
-    player = relationship("Player", back_populates="stats")
+    # relationship back to Player
+    player = relationship("Player", back_populates="season_stats")
+
+    __table_args__ = (
+        UniqueConstraint("player_id", "season", name="uq_player_id_season"),
+    )

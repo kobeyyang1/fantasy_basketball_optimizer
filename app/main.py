@@ -1,5 +1,7 @@
 # app/main.py
 
+import app.db.base  # IMPORTANT: registers models
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,7 +11,7 @@ from app.api.routes_players import router as players_router
 from app.api.routes_fantasy import router as fantasy_router
 
 from app.db.session import engine
-from app.db.base import Base
+from app.db.base_class import Base
 
 
 # Create tables
@@ -20,7 +22,10 @@ app = FastAPI(title="Fantasy Basketball API")
 # (optional) allow your frontend later
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # you can tighten later
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

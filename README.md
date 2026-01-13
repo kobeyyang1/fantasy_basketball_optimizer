@@ -10,4 +10,17 @@ Please choose the structure of the contents of this repository that suits the ne
 
 Ctrl + C # stop server if running
 venv\Scripts\activate
+.\venv\Scripts\activate
 uvicorn app.main:app
+
+TO RUN FRONTEND
+Open cmd
+cd OneDrive\Desktop\FINAL YEAR PROJECT\fantasy-basketball\fantasy-frontend
+npm run dev
+
+PUSHING TO GIT
+git status
+git branch
+
+GITLAB: git push origin main
+GITHUB: git push github main

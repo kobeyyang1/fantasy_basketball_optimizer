@@ -15,6 +15,9 @@ from app.models.player import Player
 from app.models.player_stats import PlayerStats
 from app.services.roto_scoring import compute_roto_scores
 from app.ml.ml_predictions import predict_roto_scores_with_rf, explain_player_with_shap
+from app.fantasy.risk import risk_raw_from_rows
+from app.fantasy.risk_utils import attach_risk_z
+
 
 
 
@@ -129,6 +132,44 @@ def get_players_with_stats(
 
     return result
 
+@router.get("/players_active_with_stats")
+def get_players_active_with_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_dev),
+):
+    players = (
+        db.query(Player)
+        .filter(Player.is_active == True)  # noqa: E712
+        .all()
+    )
+
+    result = []
+    for p in players:
+        if not p.stats:
+            continue
+        s = p.stats
+        result.append(
+            {
+                "id": p.id,
+                "name": p.name,
+                "team": p.team,
+                "team_full_name": getattr(p, "team_full_name", None),
+                "position": p.position,
+
+                # 9-cat stats (what we will render + color code)
+                "fg_pct": s.fg_pct,
+                "ft_pct": s.ft_pct,
+                "three_pm": s.three_pm,
+                "points": s.points,
+                "rebounds": s.rebounds,
+                "assists": s.assists,
+                "steals": s.steals,
+                "blocks": s.blocks,
+                "turnovers": s.turnovers,
+            }
+        )
+    return result
+
 
 @router.get("/player_roto/{player_id}", response_model=PlayerRoto)
 def get_player_roto(
@@ -216,6 +257,16 @@ class RotoZScoresOut(BaseModel):
     z_scores: Dict[str, float]
     total_score: float
     vor_score: float | None = None  # value over replacement
+
+class RotoRiskOut(BaseModel):
+    player_id: int
+    player_name: str
+    z_scores: Dict[str, float]
+    total_score: float
+    vor_score: float | None = None
+    risk_raw: float
+    risk_z: float
+    combined_score: float
 
 class PlayerMLRanking(BaseModel):
     player_id: int
@@ -690,6 +741,140 @@ def get_roto_rankings(
                 "vor_score": vor_total,
             }
         )
+
+    return response
+
+@router.get("/roto_risk_rankings", response_model=List[RotoRiskOut])
+def get_roto_risk_rankings(
+    risk_weight: float = 0.25,
+    league_size: int | None = None,
+    replacement_rank: int | None = None,
+    punt: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_dev),
+):
+    """
+    Roto rankings + durability (risk) combined.
+
+    combined_score = total_score + risk_weight * risk_z
+
+    - risk_raw = % games played across last 5 seasons (missing season rows count as 0 GP)
+    - risk_z = z-score of risk_raw across all ranked players
+    """
+
+    if risk_weight < 0:
+        raise HTTPException(status_code=400, detail="risk_weight must be >= 0")
+
+    players = db.query(Player).all()
+
+    player_dicts = []
+    player_id_to_player = {}
+
+    for p in players:
+        stats: PlayerStats | None = p.stats
+        if not stats:
+            continue
+
+        player_id_to_player[p.id] = p
+
+        player_dicts.append(
+            {
+                "player_id": p.id,
+                "player_name": p.name,
+                "fg_pct": stats.fg_pct,
+                "ft_pct": stats.ft_pct,
+                "three_pm": stats.three_pm,
+                "points": stats.points,
+                "rebounds": stats.rebounds,
+                "assists": stats.assists,
+                "steals": stats.steals,
+                "blocks": stats.blocks,
+                "turnovers": stats.turnovers,
+            }
+        )
+
+    if not player_dicts:
+        return []
+
+    all_categories = [
+        "fg_pct",
+        "ft_pct",
+        "three_pm",
+        "points",
+        "rebounds",
+        "assists",
+        "steals",
+        "blocks",
+        "turnovers",
+    ]
+
+    punted: list[str] = []
+    if punt:
+        punted = [c.strip() for c in punt.split(",") if c.strip()]
+
+    categories = [c for c in all_categories if c not in punted]
+
+    if not categories:
+        raise HTTPException(status_code=400, detail="All categories are punted; nothing left to score.")
+
+    # 1) base roto scoring (same as /roto_rankings)
+    results = compute_roto_scores(
+        players=player_dicts,
+        categories=categories,
+        inverted_categories=["turnovers"],
+    )
+
+    if len(results) == 0:
+        return []
+
+    # 2) replacement rank
+    if replacement_rank is not None and replacement_rank > 0:
+        effective_replacement_rank = replacement_rank
+    elif league_size is not None and league_size > 0:
+        ROSTER_SLOTS_PER_TEAM = 11
+        effective_replacement_rank = league_size * ROSTER_SLOTS_PER_TEAM
+    else:
+        effective_replacement_rank = 130
+
+    replacement_index = max(0, min(effective_replacement_rank - 1, len(results) - 1))
+    replacement_player = results[replacement_index]
+    replacement_z = replacement_player.z_scores
+
+    # 3) build response INCLUDING risk_raw (risk_z + combined added after)
+    response: List[Dict] = []
+
+    for r in results:
+        vor_total = 0.0
+        for cat in categories:
+            player_z = r.z_scores.get(cat, 0.0)
+            repl_z = replacement_z.get(cat, 0.0)
+            vor_total += (player_z - repl_z)
+
+        p = player_id_to_player.get(r.player_id)
+        risk_raw = 0.0
+        if p is not None:
+            # uses last-5 seasons from risk.py; missing seasons count as 0 GP
+            risk_raw = float(risk_raw_from_rows(p.season_stats))
+
+        response.append(
+            {
+                "player_id": r.player_id,
+                "player_name": r.player_name,
+                "z_scores": r.z_scores,
+                "total_score": float(r.total_score),
+                "vor_score": float(vor_total),
+                "risk_raw": risk_raw,
+            }
+        )
+
+    # 4) compute risk_z across the whole list
+    attach_risk_z(response)
+
+    # 5) combined score and sort
+    for item in response:
+        item["combined_score"] = float(item["total_score"] + risk_weight * item["risk_z"])
+
+    response.sort(key=lambda x: x["combined_score"], reverse=True)
 
     return response
 
