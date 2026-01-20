@@ -1,100 +1,168 @@
-import { STAT_KEYS } from "../hooks/useLeagueStats";
+// src/components/PlayerStatsTable.jsx
+import React, { useMemo } from "react";
+
+/**
+ * z is expected to be roughly in [-3, 3]. We clamp it.
+ * - positive => greener
+ * - negative => redder
+ * alpha controls intensity
+ */
+function heatBgFromZ(z) {
+  const v = Number(z);
+  if (Number.isNaN(v)) return "transparent";
+
+  const clamped = Math.max(-3, Math.min(3, v));
+  const t = Math.abs(clamped) / 3; // 0..1
+  const alpha = 0.12 + 0.40 * t; // 0.12..0.52 (tweak if you want stronger)
+
+  // Green for positive, Red for negative
+  return clamped >= 0
+    ? `rgba(0, 190, 90, ${alpha})`
+    : `rgba(220, 40, 60, ${alpha})`;
+}
+
+/**
+ * Decide text color based on background alpha/intensity.
+ * Since we use rgba, easiest is: when |z| is big, use white, else use near-white.
+ * For a dark UI, we keep text light overall.
+ */
+function textColorFromZ(z) {
+  const v = Number(z);
+  if (Number.isNaN(v)) return "rgba(255,255,255,0.9)";
+
+  const clamped = Math.max(-3, Math.min(3, v));
+  const t = Math.abs(clamped) / 3; // 0..1
+
+  // Strong heat => pure white. Weak heat => slightly dimmer white.
+  return t > 0.35 ? "#ffffff" : "rgba(255,255,255,0.88)";
+}
 
 function cellStyle(z) {
-  if (z >= 1.0) return { backgroundColor: "#b7f7c1" };
-  if (z >= 0.4) return { backgroundColor: "#ddfbe2" };
-  if (z <= -1.0) return { backgroundColor: "#ffb7b7" };
-  if (z <= -0.4) return { backgroundColor: "#ffe0e0" };
-  return { backgroundColor: "#f5f5f5" };
+  return {
+    background: heatBgFromZ(z),
+    color: textColorFromZ(z),
+    fontWeight: 700,
+    textAlign: "right",
+    padding: "10px 10px",
+    // helps readability on colored backgrounds
+    textShadow: "0 1px 0 rgba(0,0,0,0.35)",
+  };
 }
 
-function formatStat(key, v) {
-  if (v === null || v === undefined || Number.isNaN(Number(v))) return "-";
-  const n = Number(v);
-
-  if (key === "fg_pct" || key === "ft_pct") return n.toFixed(3);
-  return n.toFixed(1);
-}
-
-const LABELS = {
-  fg_pct: "FG%",
-  ft_pct: "FT%",
-  three_pm: "3PM",
-  points: "PTS",
-  rebounds: "REB",
-  assists: "AST",
-  steals: "STL",
-  blocks: "BLK",
-  turnovers: "TOV",
+// Use this for non-heat cells (like name/team)
+const plainCell = {
+  padding: "10px 10px",
+  borderBottom: "1px solid rgba(255,255,255,0.08)",
 };
 
 export default function PlayerStatsTable({
   rows,
-  statsById,
-  league,
-  extraHeaders = [],
-  renderExtraCells = () => null,
-  actionHeader = null,
-  renderActions = () => null,
-  limit = 80,
+  // rows should already contain: name/team/pos plus the stat values AND (optionally) z-scores per stat
+  // Example expected structure per row:
+  // {
+  //   player_id, player_name, position, team,
+  //   stats: { fg_pct, ft_pct, three_pm, points, ... },
+  //   z: { fg_pct, ft_pct, three_pm, points, ... },
+  //   total_score, risk_raw, combined_score
+  // }
 }) {
-  const shown = rows.slice(0, limit);
+  const cols = useMemo(
+    () => [
+      { key: "fg_pct", label: "FG%" },
+      { key: "ft_pct", label: "FT%" },
+      { key: "three_pm", label: "3PM" },
+      { key: "points", label: "PTS" },
+      { key: "rebounds", label: "REB" },
+      { key: "assists", label: "AST" },
+      { key: "steals", label: "STL" },
+      { key: "blocks", label: "BLK" },
+      { key: "turnovers", label: "TOV" },
+    ],
+    []
+  );
 
   return (
-    <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%" }}>
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Name</th>
-          <th>Pos</th>
-          <th>Team</th>
+    <div style={{ overflowX: "auto" }}>
+      <table
+        style={{
+          width: "100%",
+          borderCollapse: "separate",
+          borderSpacing: 0,
+          fontSize: 13,
+        }}
+      >
+        <thead>
+          <tr>
+            <th style={{ ...plainCell, textAlign: "left" }}>#</th>
+            <th style={{ ...plainCell, textAlign: "left" }}>Name</th>
+            <th style={{ ...plainCell, textAlign: "left" }}>Pos</th>
+            <th style={{ ...plainCell, textAlign: "left" }}>Team</th>
 
-          {STAT_KEYS.map((k) => (
-            <th key={k}>{LABELS[k]}</th>
-          ))}
+            {cols.map((c) => (
+              <th key={c.key} style={{ ...plainCell, textAlign: "right" }}>
+                {c.label}
+              </th>
+            ))}
 
-          {extraHeaders.map((h) => (
-            <th key={h}>{h}</th>
-          ))}
+            <th style={{ ...plainCell, textAlign: "right" }}>Roto</th>
+            <th style={{ ...plainCell, textAlign: "right" }}>Risk%</th>
+            <th style={{ ...plainCell, textAlign: "right" }}>Combined</th>
+          </tr>
+        </thead>
 
-          {actionHeader ? <th>{actionHeader}</th> : null}
-        </tr>
-      </thead>
+        <tbody>
+          {rows.map((r, idx) => (
+            <tr key={r.player_id}>
+              <td style={{ ...plainCell, textAlign: "left", color: "rgba(255,255,255,0.9)" }}>
+                {idx + 1}
+              </td>
 
-      <tbody>
-        {shown.map((p, idx) => {
-          const s = statsById.get(p.player_id);
+              <td style={{ ...plainCell, textAlign: "left", fontWeight: 800 }}>
+                {r.player_name}
+              </td>
 
-          return (
-            <tr key={p.player_id}>
-              <td>{idx + 1}</td>
-              <td>{p.player_name}</td>
-              <td>{p.position || "-"}</td>
-              <td>{p.team || "-"}</td>
+              <td style={{ ...plainCell, textAlign: "left", color: "rgba(255,255,255,0.85)" }}>
+                {r.position || "-"}
+              </td>
 
-              {STAT_KEYS.map((key) => {
-                const v = s?.[key];
-                const num = Number(v);
-                const { mean, std } = league[key] || { mean: 0, std: 0 };
-                const z = std ? (num - mean) / std : 0;
+              <td style={{ ...plainCell, textAlign: "left", color: "rgba(255,255,255,0.85)" }}>
+                {r.team || "-"}
+              </td>
 
-                // turnovers are bad -> invert for color
-                const zForColor = key === "turnovers" ? -z : z;
+              {cols.map((c) => {
+                const val = r.stats?.[c.key];
+                const z = r.z?.[c.key]; // <-- IMPORTANT: color uses z-score
+                const isPct = c.key === "fg_pct" || c.key === "ft_pct";
+
+                const formatted =
+                  val === null || val === undefined
+                    ? "-"
+                    : isPct
+                    ? Number(val).toFixed(3)
+                    : Number(val).toFixed(2);
 
                 return (
-                  <td key={key} style={{ textAlign: "right", ...cellStyle(zForColor) }}>
-                    {formatStat(key, v)}
+                  <td key={c.key} style={cellStyle(z)}>
+                    {formatted}
                   </td>
                 );
               })}
 
-              {renderExtraCells(p)}
+              <td style={{ ...plainCell, textAlign: "right" }}>
+                {Number(r.total_score ?? 0).toFixed(2)}
+              </td>
 
-              {actionHeader ? <td>{renderActions(p)}</td> : null}
+              <td style={{ ...plainCell, textAlign: "right" }}>
+                {(Number(r.risk_raw ?? 0) * 100).toFixed(1)}%
+              </td>
+
+              <td style={{ ...plainCell, textAlign: "right", fontWeight: 900 }}>
+                {Number(r.combined_score ?? 0).toFixed(2)}
+              </td>
             </tr>
-          );
-        })}
-      </tbody>
-    </table>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

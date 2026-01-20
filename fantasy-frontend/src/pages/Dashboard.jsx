@@ -7,67 +7,63 @@ import { useSeason } from "../hooks/useSeason";
 import { getRotoRiskRankings, getActivePlayersStats } from "../api/fantasyApi";
 
 // ---------- helpers ----------
-function safeNum(x) {
-  const n = Number(x);
+const num = (v) => {
+  const n = Number(v);
   return Number.isFinite(n) ? n : null;
-}
+};
 
-function zScore(value, mean, std) {
-  if (value === null || mean === null) return 0;
-  const s = std && std > 0 ? std : 1;
-  return (value - mean) / s;
-}
+const fmtPct = (v) => {
+  const n = num(v);
+  return n === null ? "-" : n.toFixed(3);
+};
 
-// Background color for a z-score (green = good, red = bad)
-function cellStyleFromZ(z) {
-  // clamp z to [-2, 2] for nicer gradients
-  const clamped = Math.max(-2, Math.min(2, z));
+const fmt2 = (v) => {
+  const n = num(v);
+  return n === null ? "-" : n.toFixed(2);
+};
 
-  // map to intensity 0..1
-  const intensity = Math.abs(clamped) / 2;
+// clamp 0..1
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
 
-  // light -> stronger fill
-  if (clamped >= 0.75) {
-    return {
-      background: `rgba(26, 127, 55, ${0.18 + intensity * 0.22})`,
-      borderColor: "rgba(26,127,55,0.35)",
-      color: "#0b3d1a",
-      fontWeight: 700,
-    };
-  }
-  if (clamped >= 0.3) {
-    return {
-      background: `rgba(76, 175, 80, ${0.12 + intensity * 0.18})`,
-      borderColor: "rgba(76,175,80,0.30)",
-      color: "#0b3d1a",
-      fontWeight: 700,
-    };
-  }
-  if (clamped <= -0.75) {
-    return {
-      background: `rgba(176, 0, 32, ${0.14 + intensity * 0.22})`,
-      borderColor: "rgba(176,0,32,0.35)",
-      color: "#4a0010",
-      fontWeight: 700,
-    };
-  }
-  if (clamped <= -0.3) {
-    return {
-      background: `rgba(229, 57, 53, ${0.10 + intensity * 0.18})`,
-      borderColor: "rgba(229,57,53,0.30)",
-      color: "#4a0010",
-      fontWeight: 700,
-    };
+// Linear interpolation between two numbers
+const lerp = (a, b, t) => a + (b - a) * t;
+
+// Color mix between red -> gray -> green
+// t=0 => redish, t=0.5 => neutral, t=1 => greenish
+const heatColor = (t) => {
+  const red = { r: 244, g: 67, b: 54 };     // #f44336
+  const mid = { r: 245, g: 245, b: 245 };   // #f5f5f5
+  const grn = { r: 76, g: 175, b: 80 };     // #4caf50
+
+  let c1, c2, tt;
+  if (t <= 0.5) {
+    c1 = red;
+    c2 = mid;
+    tt = t / 0.5;
+  } else {
+    c1 = mid;
+    c2 = grn;
+    tt = (t - 0.5) / 0.5;
   }
 
-  // neutral
-  return {
-    background: "transparent",
-    borderColor: "transparent",
-    color: "#222",
-    fontWeight: 600,
-  };
-}
+  const r = Math.round(lerp(c1.r, c2.r, tt));
+  const g = Math.round(lerp(c1.g, c2.g, tt));
+  const b = Math.round(lerp(c1.b, c2.b, tt));
+  return `rgb(${r}, ${g}, ${b})`;
+};
+
+// Choose black/white text depending on background brightness
+const readableTextColor = (bgRgb) => {
+  // bgRgb like "rgb(r,g,b)"
+  const m = bgRgb.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+  if (!m) return "#111";
+  const r = Number(m[1]), g = Number(m[2]), b = Number(m[3]);
+  // perceived luminance
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return lum < 160 ? "#fff" : "#111";
+};
+
+// -----------------------------------
 
 export default function Dashboard() {
   const { season, setSeason, seasons } = useSeason();
@@ -75,7 +71,8 @@ export default function Dashboard() {
   const [riskWeight, setRiskWeight] = useState(0.25);
 
   const [rankings, setRankings] = useState([]);
-  const [statsById, setStatsById] = useState(new Map());
+  const [statsList, setStatsList] = useState([]); // raw stats objects from /active_players_stats
+
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -91,11 +88,8 @@ export default function Dashboard() {
 
         if (cancelled) return;
 
-        setRankings(ranksRes.data);
-
-        const m = new Map();
-        statsRes.data.forEach((p) => m.set(p.id, p));
-        setStatsById(m);
+        setRankings(ranksRes.data || []);
+        setStatsList(statsRes.data || []);
       } catch (err) {
         console.error(err);
         alert("Failed to load dashboard. Check backend + CORS.");
@@ -110,10 +104,19 @@ export default function Dashboard() {
     };
   }, [season, riskWeight]);
 
-  const top50 = useMemo(() => rankings.slice(0, 50), [rankings]);
+  // Map stats by id for quick lookup
+  const statsById = useMemo(() => {
+    const m = new Map();
+    (statsList || []).forEach((row) => {
+      const id = num(row?.id ?? row?.player_id);
+      if (id !== null) m.set(id, row);
+    });
+    return m;
+  }, [statsList]);
 
-  const league = useMemo(() => {
-    const CATS = [
+  // Compute league min/max for each stat (using avg)
+  const leagueMinMax = useMemo(() => {
+    const keys = [
       "fg_pct",
       "ft_pct",
       "three_pm",
@@ -125,68 +128,57 @@ export default function Dashboard() {
       "turnovers",
     ];
 
-    const sums = Object.fromEntries(CATS.map((k) => [k, 0]));
-    const counts = Object.fromEntries(CATS.map((k) => [k, 0]));
+    const mm = {};
+    keys.forEach((k) => (mm[k] = { min: Infinity, max: -Infinity }));
 
-    // mean
-    statsById.forEach((p) => {
-      const a = p?.avg || p?.stats; // allow either shape
-      if (!a) return;
-      for (const k of CATS) {
-        const v = safeNum(a[k]);
-        if (v === null) continue;
-        sums[k] += v;
-        counts[k] += 1;
+    (statsList || []).forEach((row) => {
+      const a = row?.avg || {};
+      keys.forEach((k) => {
+        const v = num(a[k]);
+        if (v === null) return;
+        if (v < mm[k].min) mm[k].min = v;
+        if (v > mm[k].max) mm[k].max = v;
+      });
+    });
+
+    // handle empty/Infinity cases
+    keys.forEach((k) => {
+      if (!Number.isFinite(mm[k].min) || !Number.isFinite(mm[k].max)) {
+        mm[k] = { min: 0, max: 1 };
+      }
+      if (mm[k].min === mm[k].max) {
+        // avoid divide-by-zero later
+        mm[k].max = mm[k].min + 1;
       }
     });
 
-    const means = {};
-    for (const k of CATS) means[k] = counts[k] ? sums[k] / counts[k] : null;
+    return mm;
+  }, [statsList]);
 
-    // std
-    const varSums = Object.fromEntries(CATS.map((k) => [k, 0]));
-    statsById.forEach((p) => {
-      const a = p?.avg || p?.stats;
-      if (!a) return;
-      for (const k of CATS) {
-        const v = safeNum(a[k]);
-        const m = means[k];
-        if (v === null || m === null) continue;
-        varSums[k] += (v - m) ** 2;
-      }
-    });
+  const top50 = useMemo(() => (rankings || []).slice(0, 50), [rankings]);
 
-    const stds = {};
-    for (const k of CATS) stds[k] = counts[k] ? Math.sqrt(varSums[k] / counts[k]) : 1;
+  // stat cell style helper (background colored)
+  const statCellStyle = (key, value) => {
+    const v = num(value);
+    if (v === null) return { textAlign: "right" };
 
-    return { means, stds };
-  }, [statsById]);
+    // turnovers are "bad" when higher => invert heat
+    const invert = key === "turnovers";
 
-  const StatCell = ({ cat, value, decimals }) => {
-    const v = safeNum(value);
-    const mean = safeNum(league.means?.[cat]);
-    const std = safeNum(league.stds?.[cat]);
+    const { min, max } = leagueMinMax[key] || { min: 0, max: 1 };
+    let t = (v - min) / (max - min);
+    t = clamp01(t);
+    if (invert) t = 1 - t;
 
-    let z = zScore(v, mean, std);
-    if (cat === "turnovers") z = -z; // lower turnovers = better
+    const bg = heatColor(t);
+    const color = readableTextColor(bg);
 
-    const text = v === null ? "-" : Number(v).toFixed(decimals);
-    const styles = cellStyleFromZ(z);
-
-    return (
-      <td
-        style={{
-          textAlign: "right",
-          whiteSpace: "nowrap",
-          padding: 8,
-          border: "1px solid #ddd",
-          ...styles,
-        }}
-        title={`z = ${z.toFixed(2)}`}
-      >
-        {text}
-      </td>
-    );
+    return {
+      textAlign: "right",
+      background: bg,
+      color,
+      fontWeight: 700,
+    };
   };
 
   return (
@@ -201,12 +193,9 @@ export default function Dashboard() {
         <Loading text="Loading dashboard..." />
       ) : (
         <table
+          border="1"
           cellPadding="8"
-          style={{
-            borderCollapse: "collapse",
-            width: "100%",
-            border: "1px solid #ddd",
-          }}
+          style={{ borderCollapse: "collapse", width: "100%" }}
         >
           <thead>
             <tr>
@@ -233,34 +222,38 @@ export default function Dashboard() {
 
           <tbody>
             {top50.map((r, idx) => {
-              const ps = statsById.get(r.player_id);
-              const avg = ps?.avg || ps?.stats || {};
+              const pid = Number(r.player_id);
+              const row = statsById.get(pid);
+
+              const a = row?.avg || {};
+              const pos = row?.position || "-";
+              const team = row?.team || "-";
 
               return (
-                <tr key={r.player_id}>
-                  <td style={{ border: "1px solid #ddd" }}>{idx + 1}</td>
-                  <td style={{ border: "1px solid #ddd" }}>{r.player_name}</td>
-                  <td style={{ border: "1px solid #ddd" }}>{ps?.position || "-"}</td>
-                  <td style={{ border: "1px solid #ddd" }}>{ps?.team || "-"}</td>
+                <tr key={pid}>
+                  <td>{idx + 1}</td>
+                  <td>{r.player_name}</td>
+                  <td>{pos}</td>
+                  <td>{team}</td>
 
-                  <StatCell cat="fg_pct" value={avg.fg_pct} decimals={3} />
-                  <StatCell cat="ft_pct" value={avg.ft_pct} decimals={3} />
+                  <td style={statCellStyle("fg_pct", a.fg_pct)}>{fmtPct(a.fg_pct)}</td>
+                  <td style={statCellStyle("ft_pct", a.ft_pct)}>{fmtPct(a.ft_pct)}</td>
 
-                  <StatCell cat="three_pm" value={avg.three_pm} decimals={2} />
-                  <StatCell cat="points" value={avg.points} decimals={2} />
-                  <StatCell cat="rebounds" value={avg.rebounds} decimals={2} />
-                  <StatCell cat="assists" value={avg.assists} decimals={2} />
-                  <StatCell cat="steals" value={avg.steals} decimals={2} />
-                  <StatCell cat="blocks" value={avg.blocks} decimals={2} />
-                  <StatCell cat="turnovers" value={avg.turnovers} decimals={2} />
+                  <td style={statCellStyle("three_pm", a.three_pm)}>{fmt2(a.three_pm)}</td>
+                  <td style={statCellStyle("points", a.points)}>{fmt2(a.points)}</td>
+                  <td style={statCellStyle("rebounds", a.rebounds)}>{fmt2(a.rebounds)}</td>
+                  <td style={statCellStyle("assists", a.assists)}>{fmt2(a.assists)}</td>
+                  <td style={statCellStyle("steals", a.steals)}>{fmt2(a.steals)}</td>
+                  <td style={statCellStyle("blocks", a.blocks)}>{fmt2(a.blocks)}</td>
+                  <td style={statCellStyle("turnovers", a.turnovers)}>{fmt2(a.turnovers)}</td>
 
-                  <td style={{ textAlign: "right", border: "1px solid #ddd" }}>
+                  <td style={{ textAlign: "right" }}>
                     {Number(r.total_score ?? 0).toFixed(2)}
                   </td>
-                  <td style={{ textAlign: "right", border: "1px solid #ddd" }}>
+                  <td style={{ textAlign: "right" }}>
                     {(Number(r.risk_raw ?? 0) * 100).toFixed(1)}%
                   </td>
-                  <td style={{ textAlign: "right", border: "1px solid #ddd" }}>
+                  <td style={{ textAlign: "right" }}>
                     {Number(r.combined_score ?? 0).toFixed(2)}
                   </td>
                 </tr>
