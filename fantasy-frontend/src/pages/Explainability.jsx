@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Loading from "../components/Loading";
 import Modal from "../components/Modal";
-import { getMLRankings, getMLExplain } from "../api/fantasyApi";
+import { getExplainabilityList, getMLExplain } from "../api/fantasyApi";
 import { useSeason } from "../hooks/useSeason";
 import SeasonDropdown from "../components/SeasonDropdown";
 
@@ -32,19 +32,19 @@ export default function Explainability() {
   const [explain, setExplain] = useState(null);
   const [loadingExplain, setLoadingExplain] = useState(false);
 
-  // Fetch rankings when season changes
+  // Fetch rankings when season changes (CONSISTENT with Dashboard: risk_weight = 0)
   useEffect(() => {
     let cancelled = false;
     setLoadingList(true);
 
-    getMLRankings({ limit: 300, season })
+    getExplainabilityList({ season, risk_weight: 0 })
       .then((res) => {
         if (cancelled) return;
         setPlayers(res.data);
       })
       .catch((err) => {
         console.error(err);
-        alert("Failed to load ML rankings.");
+        alert("Failed to load rankings list.");
       })
       .finally(() => {
         if (!cancelled) setLoadingList(false);
@@ -63,10 +63,15 @@ export default function Explainability() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return players;
-    return players.filter((p) => (p.name || "").toLowerCase().includes(q));
+    return players.filter((p) =>
+      (p.player_name || "").toLowerCase().includes(q)
+    );
   }, [players, query]);
 
-  const shown = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
+  const shown = useMemo(
+    () => filtered.slice(0, visibleCount),
+    [filtered, visibleCount]
+  );
 
   const openExplain = async (p) => {
     setSelected(p);
@@ -74,6 +79,7 @@ export default function Explainability() {
     setLoadingExplain(true);
 
     try {
+      // IMPORTANT: pass season into explain endpoint
       const res = await getMLExplain(p.player_id, { season });
       setExplain(res.data);
     } catch (err) {
@@ -115,16 +121,28 @@ export default function Explainability() {
   return (
     <div>
       <h2>Explainability</h2>
-      <p>Click a player name to see SHAP impacts on the ML score.</p>
+      <p>
+        This list matches Dashboard rankings when Risk Weight = 0. Click a player
+        name to see SHAP impacts on the ML score.
+      </p>
 
       {/* Controls */}
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", margin: "12px 0 16px 0" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 14,
+          flexWrap: "wrap",
+          margin: "12px 0 16px 0",
+        }}
+      >
         {/* Season dropdown */}
         <SeasonDropdown value={season} onChange={setSeason} seasons={seasons} />
 
         {/* Search */}
         <div>
-          <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>Search</div>
+          <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>
+            Search
+          </div>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -132,13 +150,14 @@ export default function Explainability() {
             style={{ width: 320, padding: 8 }}
           />
           <div style={{ marginTop: 6, color: "#666" }}>
-            Showing {Math.min(visibleCount, filtered.length)} of {filtered.length}
+            Showing {Math.min(visibleCount, filtered.length)} of{" "}
+            {filtered.length}
           </div>
         </div>
       </div>
 
       {loadingList ? (
-        <Loading text="Loading ML rankings..." />
+        <Loading text="Loading rankings..." />
       ) : (
         <>
           <ol style={{ lineHeight: 1.9, paddingLeft: 22 }}>
@@ -154,26 +173,35 @@ export default function Explainability() {
                   }}
                   title="Click to explain"
                 >
-                  {p.name}
+                  {p.player_name}
                 </span>{" "}
-                — ML {Number(p.ml_score).toFixed(2)}
+                — Roto {Number(p.total_score ?? 0).toFixed(2)}
               </li>
             ))}
           </ol>
 
           {canShowMore && (
-            <button onClick={() => setVisibleCount((n) => n + 50)} style={{ padding: "8px 12px" }}>
+            <button
+              onClick={() => setVisibleCount((n) => n + 50)}
+              style={{ padding: "8px 12px" }}
+            >
               Show more
             </button>
           )}
 
-          {filtered.length === 0 && <div style={{ color: "#666" }}>No players found.</div>}
+          {filtered.length === 0 && (
+            <div style={{ color: "#666" }}>No players found.</div>
+          )}
         </>
       )}
 
       <Modal
         open={!!selected}
-        title={selected ? `${selected.name} — SHAP Explanation (${season})` : "Explanation"}
+        title={
+          selected
+            ? `${selected.player_name} — SHAP Explanation (${season})`
+            : "Explanation"
+        }
         onClose={closeModal}
         width={920}
       >
@@ -194,14 +222,20 @@ export default function Explainability() {
                 <b>Base value:</b> {Number(explain.base_value).toFixed(2)}
               </div>
               <div>
-                <b>Games played (GP):</b> {explain.gp !== undefined ? Number(explain.gp) : "N/A"}
+                <b>Games played (GP):</b>{" "}
+                {explain.gp !== undefined ? Number(explain.gp) : "N/A"}
               </div>
               <div style={{ color: "#666", marginTop: 6 }}>
-                Positive SHAP values push the score up, negative values push it down.
+                Positive SHAP values push the score up, negative values push it
+                down.
               </div>
             </div>
 
-            <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%" }}>
+            <table
+              border="1"
+              cellPadding="8"
+              style={{ borderCollapse: "collapse", width: "100%" }}
+            >
               <thead>
                 <tr>
                   <th>Category</th>
@@ -221,13 +255,22 @@ export default function Explainability() {
                     <tr key={r.feature}>
                       <td>{r.feature}</td>
 
-                      <td style={{ textAlign: "right" }}>{formatAvg(r.feature, r.value, gp)}</td>
+                      <td style={{ textAlign: "right" }}>
+                        {formatAvg(r.feature, r.value, gp)}
+                      </td>
 
-                      <td style={{ textAlign: "right" }}>{formatTotal(r.feature, r.value)}</td>
+                      <td style={{ textAlign: "right" }}>
+                        {formatTotal(r.feature, r.value)}
+                      </td>
 
                       <td style={{ textAlign: "right" }}>{shap.toFixed(3)}</td>
 
-                      <td style={{ fontWeight: 700, color: good ? "#0a7a2f" : "#b00020" }}>
+                      <td
+                        style={{
+                          fontWeight: 700,
+                          color: good ? "#0a7a2f" : "#b00020",
+                        }}
+                      >
                         {good ? "↑ helps" : "↓ hurts"}
                       </td>
                     </tr>
@@ -237,7 +280,8 @@ export default function Explainability() {
             </table>
 
             <div style={{ marginTop: 8, color: "#666" }}>
-              Note: For counting stats, Avg = Total / GP. For FG% and FT%, Avg is the same as Total.
+              Note: For counting stats, Avg = Total / GP. For FG% and FT%, Avg is
+              the same as Total.
             </div>
           </div>
         )}

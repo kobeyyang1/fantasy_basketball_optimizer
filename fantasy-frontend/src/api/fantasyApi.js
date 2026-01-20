@@ -47,5 +47,9 @@ export const getPlayersWithStats = () =>
 export const getActivePlayersStats = (params = {}) =>
   api.get("/fantasy/active_players_stats", { params });
 
+export const getExplainabilityList = (params = {}) =>
+  api.get("/fantasy/roto_risk_rankings", { params });
+
+
 
 
