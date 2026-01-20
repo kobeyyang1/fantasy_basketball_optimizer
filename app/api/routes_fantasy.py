@@ -826,6 +826,7 @@ def get_roto_rankings(
 
 @router.get("/roto_risk_rankings", response_model=List[RotoRiskOut])
 def get_roto_risk_rankings(
+    season: str = "2024-25",              # ✅ NEW
     risk_weight: float = 0.25,
     league_size: int | None = None,
     replacement_rank: int | None = None,
@@ -834,42 +835,62 @@ def get_roto_risk_rankings(
     current_user: User = Depends(get_current_user_dev),
 ):
     """
-    Roto rankings + durability (risk) combined.
+    Roto rankings + durability (risk) combined, for a specific season.
 
-    combined_score = total_score + risk_weight * risk_z
-
-    - risk_raw = % games played across last 5 seasons (missing season rows count as 0 GP)
-    - risk_z = z-score of risk_raw across all ranked players
+    - Rankings are computed from PlayerSeasonStats for `season` ONLY
+      (so players with no row/gp=0 in that season are excluded).
+    - Counting stats are converted to PER-GAME using gp (totals / gp).
+    - FG%/FT% are used as-is.
+    - risk_raw = % games played across last 5 seasons (from player_season_stats)
+    - risk_z computed across returned list
+    - combined_score = total_score + risk_weight * risk_z
     """
 
     if risk_weight < 0:
         raise HTTPException(status_code=400, detail="risk_weight must be >= 0")
 
-    players = db.query(Player).all()
+    # ---- 1) season pool (ONLY players who have stats for that season) ----
+    season_rows = (
+        db.query(PlayerSeasonStats, Player)
+        .join(Player, Player.id == PlayerSeasonStats.player_id)
+        .filter(PlayerSeasonStats.season == season)
+        .filter(Player.is_active == True)
+        .all()
+    )
 
+    # exclude gp=0 rows (didn't play)
+    season_rows = [(s, p) for (s, p) in season_rows if int(s.gp or 0) > 0]
+
+    if not season_rows:
+        return []
+
+    # ---- 2) build player_dicts for compute_roto_scores (PER-GAME) ----
     player_dicts = []
     player_id_to_player = {}
 
-    for p in players:
-        stats: PlayerStats | None = p.stats
-        if not stats:
+    for s, p in season_rows:
+        gp = float(s.gp or 0)
+        if gp <= 0:
             continue
 
         player_id_to_player[p.id] = p
+
+        def pg(x):
+            return (float(x) / gp) if x is not None else None
 
         player_dicts.append(
             {
                 "player_id": p.id,
                 "player_name": p.name,
-                "fg_pct": stats.fg_pct,
-                "ft_pct": stats.ft_pct,
-                "three_pm": stats.three_pm,
-                "points": stats.points,
-                "rebounds": stats.rebounds,
-                "assists": stats.assists,
-                "steals": stats.steals,
-                "blocks": stats.blocks,
-                "turnovers": stats.turnovers,
+                "fg_pct": float(s.fg_pct) if s.fg_pct is not None else None,
+                "ft_pct": float(s.ft_pct) if s.ft_pct is not None else None,
+                "three_pm": pg(s.three_pm),
+                "points": pg(s.points),
+                "rebounds": pg(s.rebounds),
+                "assists": pg(s.assists),
+                "steals": pg(s.steals),
+                "blocks": pg(s.blocks),
+                "turnovers": pg(s.turnovers),
             }
         )
 
@@ -893,21 +914,19 @@ def get_roto_risk_rankings(
         punted = [c.strip() for c in punt.split(",") if c.strip()]
 
     categories = [c for c in all_categories if c not in punted]
-
     if not categories:
         raise HTTPException(status_code=400, detail="All categories are punted; nothing left to score.")
 
-    # 1) base roto scoring (same as /roto_rankings)
+    # ---- 3) base roto scoring ----
     results = compute_roto_scores(
         players=player_dicts,
         categories=categories,
         inverted_categories=["turnovers"],
     )
-
     if len(results) == 0:
         return []
 
-    # 2) replacement rank
+    # ---- 4) replacement rank (VOR baseline) ----
     if replacement_rank is not None and replacement_rank > 0:
         effective_replacement_rank = replacement_rank
     elif league_size is not None and league_size > 0:
@@ -920,7 +939,7 @@ def get_roto_risk_rankings(
     replacement_player = results[replacement_index]
     replacement_z = replacement_player.z_scores
 
-    # 3) build response INCLUDING risk_raw (risk_z + combined added after)
+    # ---- 5) build response WITH risk_raw (same as before) ----
     response: List[Dict] = []
 
     for r in results:
@@ -933,7 +952,6 @@ def get_roto_risk_rankings(
         p = player_id_to_player.get(r.player_id)
         risk_raw = 0.0
         if p is not None:
-            # uses last-5 seasons from risk.py; missing seasons count as 0 GP
             risk_raw = float(risk_raw_from_rows(p.season_stats))
 
         response.append(
@@ -943,19 +961,20 @@ def get_roto_risk_rankings(
                 "z_scores": r.z_scores,
                 "total_score": float(r.total_score),
                 "vor_score": float(vor_total),
-                "risk_raw": risk_raw,
+                "risk_raw": float(risk_raw),
+
+                # ✅ include season so frontend can display/debug
+                "season": season,
             }
         )
 
-    # 4) compute risk_z across the whole list
+    # ---- 6) risk_z + combined score ----
     attach_risk_z(response)
 
-    # 5) combined score and sort
     for item in response:
         item["combined_score"] = float(item["total_score"] + risk_weight * item["risk_z"])
 
     response.sort(key=lambda x: x["combined_score"], reverse=True)
-
     return response
 
 
