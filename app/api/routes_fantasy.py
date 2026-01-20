@@ -35,6 +35,81 @@ print("🚨 FASTAPI USING DB:", SQLALCHEMY_DATABASE_URL)
 
 router = APIRouter(tags=["fantasy"])
 
+from fastapi import Query
+from sqlalchemy.orm import Session
+from app.models.player import Player
+from app.models.player_season_stats import PlayerSeasonStats
+
+@router.get("/active_players_stats")
+def active_players_stats(
+    season: str = Query(..., description="Season like 2024-25"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_dev),
+):
+    """
+    Returns ACTIVE players' season totals + per-game averages for a given season.
+    Uses player_season_stats (not PlayerStats) so GP is real and season-specific.
+    """
+    rows = (
+        db.query(PlayerSeasonStats, Player)
+        .join(Player, Player.id == PlayerSeasonStats.player_id)
+        .filter(Player.is_active == True)
+        .filter(PlayerSeasonStats.season == season)
+        .all()
+    )
+
+    out = []
+    for (s, p) in rows:
+        gp = int(s.gp or 0)
+
+        def per_game(v):
+            try:
+                v = float(v or 0)
+            except Exception:
+                return 0.0
+            return round(v / gp, 3) if gp > 0 else 0.0
+
+        out.append(
+            {
+                "id": p.id,
+                "name": p.name,
+                "team": p.team,
+                "position": p.position,
+                "season": season,
+                "gp": gp,
+
+                # totals
+                "totals": {
+                    "points": float(s.points or 0),
+                    "rebounds": float(s.rebounds or 0),
+                    "assists": float(s.assists or 0),
+                    "steals": float(s.steals or 0),
+                    "blocks": float(s.blocks or 0),
+                    "three_pm": float(s.three_pm or 0),
+                    "turnovers": float(s.turnovers or 0),
+                    "fg_pct": float(s.fg_pct or 0),
+                    "ft_pct": float(s.ft_pct or 0),
+                },
+
+                # per-game averages (what you want to show on frontend)
+                "avg": {
+                    "points": per_game(s.points),
+                    "rebounds": per_game(s.rebounds),
+                    "assists": per_game(s.assists),
+                    "steals": per_game(s.steals),
+                    "blocks": per_game(s.blocks),
+                    "three_pm": per_game(s.three_pm),
+                    "turnovers": per_game(s.turnovers),
+
+                    # percentages are already “rate stats” (don’t divide by GP)
+                    "fg_pct": round(float(s.fg_pct or 0), 3),
+                    "ft_pct": round(float(s.ft_pct or 0), 3),
+                },
+            }
+        )
+
+    return out
+
 @router.get("/debug_db")
 def debug_db():
     return {"db_url": SQLALCHEMY_DATABASE_URL}

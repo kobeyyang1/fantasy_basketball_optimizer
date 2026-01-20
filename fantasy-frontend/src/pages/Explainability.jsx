@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Loading from "../components/Loading";
 import Modal from "../components/Modal";
 import { getMLRankings, getMLExplain } from "../api/fantasyApi";
+import { useSeason } from "../hooks/useSeason";
+import SeasonDropdown from "../components/SeasonDropdown";
 
 const PER_GAME_STATS = new Set([
   "points",
@@ -17,11 +19,8 @@ const PER_GAME_STATS = new Set([
 
 const PERCENT_STATS = new Set(["fg_pct", "ft_pct"]);
 
-const SUPPORTED_SEASONS = ["2024-25", "2023-24", "2022-23", "2021-22", "2020-21", "2019-20"];
-const DEFAULT_SEASON = "2024-25";
-
 export default function Explainability() {
-  const [season, setSeason] = useState(DEFAULT_SEASON);
+  const { season, setSeason, seasons } = useSeason();
 
   const [players, setPlayers] = useState([]);
   const [loadingList, setLoadingList] = useState(true);
@@ -35,18 +34,28 @@ export default function Explainability() {
 
   // Fetch rankings when season changes
   useEffect(() => {
+    let cancelled = false;
     setLoadingList(true);
 
     getMLRankings({ limit: 300, season })
-      .then((res) => setPlayers(res.data))
+      .then((res) => {
+        if (cancelled) return;
+        setPlayers(res.data);
+      })
       .catch((err) => {
         console.error(err);
         alert("Failed to load ML rankings.");
       })
-      .finally(() => setLoadingList(false));
+      .finally(() => {
+        if (!cancelled) setLoadingList(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [season]);
 
-  // Reset visible list whenever the search changes or season changes
+  // Reset visible list when search OR season changes
   useEffect(() => {
     setVisibleCount(50);
   }, [query, season]);
@@ -65,7 +74,6 @@ export default function Explainability() {
     setLoadingExplain(true);
 
     try {
-      // IMPORTANT: pass season into explain endpoint
       const res = await getMLExplain(p.player_id, { season });
       setExplain(res.data);
     } catch (err) {
@@ -87,7 +95,6 @@ export default function Explainability() {
   const formatTotal = (feature, value) => {
     const n = Number(value);
     if (Number.isNaN(n)) return "-";
-    // percentages show 3 decimals, counting stats show 0 decimals
     return PERCENT_STATS.has(feature) ? n.toFixed(3) : n.toFixed(0);
   };
 
@@ -113,20 +120,7 @@ export default function Explainability() {
       {/* Controls */}
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", margin: "12px 0 16px 0" }}>
         {/* Season dropdown */}
-        <div>
-          <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>Season</div>
-          <select
-            value={season}
-            onChange={(e) => setSeason(e.target.value)}
-            style={{ padding: 8, minWidth: 140 }}
-          >
-            {SUPPORTED_SEASONS.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </div>
+        <SeasonDropdown value={season} onChange={setSeason} seasons={seasons} />
 
         {/* Search */}
         <div>
@@ -147,7 +141,6 @@ export default function Explainability() {
         <Loading text="Loading ML rankings..." />
       ) : (
         <>
-          {/* Numbered list */}
           <ol style={{ lineHeight: 1.9, paddingLeft: 22 }}>
             {shown.map((p) => (
               <li key={p.player_id}>
@@ -168,7 +161,6 @@ export default function Explainability() {
             ))}
           </ol>
 
-          {/* Show more */}
           {canShowMore && (
             <button onClick={() => setVisibleCount((n) => n + 50)} style={{ padding: "8px 12px" }}>
               Show more
@@ -179,14 +171,9 @@ export default function Explainability() {
         </>
       )}
 
-      {/* Modal popup */}
       <Modal
         open={!!selected}
-        title={
-          selected
-            ? `${selected.name} — SHAP Explanation (${season})`
-            : "Explanation"
-        }
+        title={selected ? `${selected.name} — SHAP Explanation (${season})` : "Explanation"}
         onClose={closeModal}
         width={920}
       >
@@ -207,19 +194,14 @@ export default function Explainability() {
                 <b>Base value:</b> {Number(explain.base_value).toFixed(2)}
               </div>
               <div>
-                <b>Games played (GP):</b>{" "}
-                {explain.gp !== undefined ? Number(explain.gp) : "N/A"}
+                <b>Games played (GP):</b> {explain.gp !== undefined ? Number(explain.gp) : "N/A"}
               </div>
               <div style={{ color: "#666", marginTop: 6 }}>
                 Positive SHAP values push the score up, negative values push it down.
               </div>
             </div>
 
-            <table
-              border="1"
-              cellPadding="8"
-              style={{ borderCollapse: "collapse", width: "100%" }}
-            >
+            <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%" }}>
               <thead>
                 <tr>
                   <th>Category</th>
@@ -239,24 +221,13 @@ export default function Explainability() {
                     <tr key={r.feature}>
                       <td>{r.feature}</td>
 
-                      {/* Player averages */}
-                      <td style={{ textAlign: "right" }}>
-                        {formatAvg(r.feature, r.value, gp)}
-                      </td>
+                      <td style={{ textAlign: "right" }}>{formatAvg(r.feature, r.value, gp)}</td>
 
-                      {/* Totals */}
-                      <td style={{ textAlign: "right" }}>
-                        {formatTotal(r.feature, r.value)}
-                      </td>
+                      <td style={{ textAlign: "right" }}>{formatTotal(r.feature, r.value)}</td>
 
                       <td style={{ textAlign: "right" }}>{shap.toFixed(3)}</td>
 
-                      <td
-                        style={{
-                          fontWeight: 700,
-                          color: good ? "#0a7a2f" : "#b00020",
-                        }}
-                      >
+                      <td style={{ fontWeight: 700, color: good ? "#0a7a2f" : "#b00020" }}>
                         {good ? "↑ helps" : "↓ hurts"}
                       </td>
                     </tr>
