@@ -272,6 +272,8 @@ class PlayerMLRanking(BaseModel):
     player_id: int
     name: str
     team: str | None = None
+    position: str | None = None
+    season: str
     ml_score: float
 
 class ShapFeatureImpact(BaseModel):
@@ -285,6 +287,9 @@ class PlayerMLExplainOut(BaseModel):
     player_id: int
     name: str
     team: str | None = None
+    position: str | None = None
+    season: str
+    gp: int
     ml_score: float
     base_value: float
     impacts: List[ShapFeatureImpact]
@@ -1069,45 +1074,27 @@ def debug_players(
 @router.get("/ml_rankings", response_model=List[PlayerMLRanking])
 def get_ml_rankings(
     limit: int = 50,
+    season: str = "2024-25",
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_dev),  # or get_current_user if you swapped back
+    current_user: User = Depends(get_current_user_dev),
 ):
-    """
-    ML-based roto rankings using the trained RandomForest model.
-
-    - Uses the same 9-cat stats as features.
-    - Model was trained to predict the roto total_score.
-    - Returns players sorted by predicted ML score descending.
-    """
-
-    results = predict_roto_scores_with_rf(db)
-
-    # Apply simple limit
+    results = predict_roto_scores_with_rf(db, season=season)
     return results[:limit]
 
 @router.get("/ml_explain/{player_id}", response_model=PlayerMLExplainOut)
 def get_ml_explain(
     player_id: int,
+    season: str = "2024-25",
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_dev),  # or get_current_user_dev if you're using the dev shortcut
+    current_user: User = Depends(get_current_user_dev),
 ):
-    """
-    Return a SHAP explanation for the ML (RandomForest) roto score
-    for a single player.
-
-    - ml_score: the RF-predicted roto score
-    - base_value: the model's expected prediction (average player)
-    - impacts: per-stat SHAP values showing how each feature moved
-               this player above/below the base_value.
-    """
     try:
-        data = explain_player_with_shap(db, player_id)
+        data = explain_player_with_shap(db, player_id, season=season)
     except ValueError:
         raise HTTPException(
             status_code=404,
-            detail="Player not found in ML feature set (no stats or missing data).",
+            detail="Player not found in ML feature set for that season.",
         )
-
     return data
 
 def compute_team_score_for_ids(

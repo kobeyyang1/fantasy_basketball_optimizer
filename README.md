@@ -22,5 +22,8 @@ PUSHING TO GIT
 git status
 git branch
 
+git add .
+git commit -m "Update project"
+
 GITLAB: git push origin main
 GITHUB: git push github main
