@@ -1,48 +1,32 @@
+// src/pages/DraftPlanner.jsx
 import { useEffect, useMemo, useState } from "react";
 import Loading from "../components/Loading";
-import { getRotoRiskRankings, getActivePlayersStats } from "../api/fantasyApi";
+import SeasonDropdown from "../components/SeasonDropdown";
+import RiskSlider from "../components/RiskSlider";
+import StatCell from "../components/StatCell";
+import { useSeason } from "../hooks/useSeason";
+import { useLeagueStats } from "../hooks/useLeagueStats";
+import { getRotoRiskRankings } from "../api/fantasyApi";
 import { loadJSON, saveJSON } from "../utils/storage";
 
 const STORAGE_KEY = "draftPlannerState_v1";
 const POSITIONS = ["All", "PG", "SG", "SF", "PF", "C", "G", "F"];
 
-const STAT_KEYS = [
-  "fg_pct",
-  "ft_pct",
-  "three_pm",
-  "points",
-  "rebounds",
-  "assists",
-  "steals",
-  "blocks",
-  "turnovers",
-];
+const num = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
 
-function meanStd(values) {
-  const vals = values
-    .map((v) => Number(v))
-    .filter((v) => v !== null && v !== undefined && !Number.isNaN(v));
-
-  if (vals.length === 0) return { mean: 0, std: 0 };
-
-  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-  const variance = vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length;
-  const std = Math.sqrt(variance);
-
-  return { mean, std };
-}
-
-function cellStyle(z) {
-  // z-score -> background color
-  if (z >= 1.0) return { backgroundColor: "#b7f7c1" }; // strong green
-  if (z >= 0.4) return { backgroundColor: "#ddfbe2" }; // light green
-  if (z <= -1.0) return { backgroundColor: "#ffb7b7" }; // strong red
-  if (z <= -0.4) return { backgroundColor: "#ffe0e0" }; // light red
-  return { backgroundColor: "#f5f5f5" }; // neutral
-}
+const fmtPct = (v) => (num(v) === null ? "-" : Number(v).toFixed(3));
+const fmt2 = (v) => (num(v) === null ? "-" : Number(v).toFixed(2));
 
 export default function DraftPlanner() {
-  const [riskWeight, setRiskWeight] = useState(0.25);
+  const { season, setSeason, seasons } = useSeason();
+
+  const [riskWeight, setRiskWeight] = useState(() => {
+    const saved = loadJSON(STORAGE_KEY, null);
+    return saved?.riskWeight ?? 0.25;
+  });
 
   // rankings from backend
   const [players, setPlayers] = useState([]);
@@ -56,73 +40,38 @@ export default function DraftPlanner() {
   const [draftedIds, setDraftedIds] = useState(() =>
     loadJSON(STORAGE_KEY, { draftedIds: [], myTeamIds: [], riskWeight: 0.25 }).draftedIds
   );
-
   const [myTeamIds, setMyTeamIds] = useState(() =>
     loadJSON(STORAGE_KEY, { draftedIds: [], myTeamIds: [], riskWeight: 0.25 }).myTeamIds
   );
 
-  // stats map: player_id -> stats object
-  const [statsById, setStatsById] = useState(new Map());
+  // league stats + per player totals/avg map
+  const { statsById, league, loading: loadingLeague } = useLeagueStats({ season });
 
-  // load saved riskWeight too
-  useEffect(() => {
-    const saved = loadJSON(STORAGE_KEY, null);
-    if (saved?.riskWeight !== undefined) setRiskWeight(saved.riskWeight);
-  }, []);
-
-  // persist state whenever it changes
   useEffect(() => {
     saveJSON(STORAGE_KEY, { draftedIds, myTeamIds, riskWeight });
   }, [draftedIds, myTeamIds, riskWeight]);
 
-  // fetch rankings whenever riskWeight changes
+  // fetch rankings whenever season or riskWeight changes
   useEffect(() => {
     setLoading(true);
-    getRotoRiskRankings({ risk_weight: riskWeight })
+    getRotoRiskRankings({ season, risk_weight: riskWeight })
       .then((res) => setPlayers(res.data))
       .catch((err) => {
         console.error(err);
         alert("Failed to load draft rankings (backend/CORS).");
       })
       .finally(() => setLoading(false));
-  }, [riskWeight]);
-
-  // fetch stats once (active players + 9-cat stats)
-  useEffect(() => {
-    getActivePlayersStats()
-      .then((res) => {
-        const m = new Map();
-        res.data.forEach((p) => m.set(p.id, p));
-        setStatsById(m);
-      })
-      .catch((err) => {
-        console.error(err);
-        alert("Failed to load player stats list.");
-      });
-  }, []);
+  }, [season, riskWeight]);
 
   const draftedSet = useMemo(() => new Set(draftedIds), [draftedIds]);
   const myTeamSet = useMemo(() => new Set(myTeamIds), [myTeamIds]);
-
-  // league baselines (mean/std) for each stat key
-  const league = useMemo(() => {
-    const rows = Array.from(statsById.values());
-    const out = {};
-    STAT_KEYS.forEach((k) => {
-      out[k] = meanStd(rows.map((r) => r[k]));
-    });
-    return out;
-  }, [statsById]);
 
   const availablePlayers = useMemo(() => {
     const q = query.trim().toLowerCase();
 
     return players
       .filter((p) => !draftedSet.has(p.player_id))
-      .filter((p) => {
-        if (!q) return true;
-        return (p.player_name || "").toLowerCase().includes(q);
-      })
+      .filter((p) => (!q ? true : (p.player_name || "").toLowerCase().includes(q)))
       .filter((p) => {
         if (posFilter === "All") return true;
         const pos = (p.position || "").toUpperCase();
@@ -150,49 +99,109 @@ export default function DraftPlanner() {
   };
 
   const clearDraft = () => {
-    // eslint-disable-next-line no-restricted-globals
     if (!confirm("Clear draft state?")) return;
     setDraftedIds([]);
     setMyTeamIds([]);
   };
 
+  // --- helpers for z-scoring + values ---
+  const zOf = (statKey, v) => {
+    const mean = league?.mean?.[statKey];
+    const std = league?.std?.[statKey];
+    const val = num(v);
+    if (val === null || mean === undefined || std === undefined || !std) return null;
+    return (val - mean) / std;
+  };
+
+  const getAvg = (pid, key) => statsById?.get(pid)?.avg?.[key];
+  const getPct = (pid, key) => statsById?.get(pid)?.avg?.[key]; // fg/ft already avg
+  const getTeam = (pid) => statsById?.get(pid)?.team;
+  const getPos = (pid) => statsById?.get(pid)?.position;
+
+  // table styles (forces DARK table, prevents white blocks)
+  const tableStyle = {
+    width: "100%",
+    borderCollapse: "separate",
+    borderSpacing: 0,
+    overflow: "hidden",
+    borderRadius: 14,
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid rgba(255,255,255,0.08)",
+  };
+
+  const thStyle = {
+    textAlign: "left",
+    padding: "10px 10px",
+    fontSize: 12,
+    letterSpacing: 0.2,
+    color: "rgba(255,255,255,0.75)",
+    borderBottom: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.04)",
+    whiteSpace: "nowrap",
+  };
+
+  const tdBase = {
+    padding: "10px 10px",
+    borderBottom: "1px solid rgba(255,255,255,0.08)",
+    borderRight: "1px solid rgba(255,255,255,0.06)",
+    color: "#e6edf3",
+    background: "transparent",
+    whiteSpace: "nowrap",
+    fontSize: 13,
+  };
+
   return (
     <div>
       <h2>Draft Planner</h2>
-      <p>
+      <p style={{ color: "rgba(255,255,255,0.75)" }}>
         Track who’s drafted and who’s still available using your roto + durability ranking.
         Stats are color-coded vs league average (green = good, red = bad).
       </p>
 
-      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 16, alignItems: "end" }}>
         <div>
-          <label style={{ display: "block", marginBottom: 6 }}>
-            Risk Weight: <b>{riskWeight.toFixed(2)}</b>
-          </label>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={riskWeight}
-            onChange={(e) => setRiskWeight(Number(e.target.value))}
-            style={{ width: 280 }}
-          />
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", marginBottom: 6 }}>Season</div>
+          <SeasonDropdown value={season} onChange={setSeason} seasons={seasons} />
         </div>
 
         <div>
-          <label style={{ display: "block", marginBottom: 6 }}>Search</label>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", marginBottom: 6 }}>
+            Risk Weight: <b style={{ color: "#fff" }}>{riskWeight.toFixed(2)}</b>
+          </div>
+          <RiskSlider value={riskWeight} onChange={setRiskWeight} />
+        </div>
+
+        <div>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", marginBottom: 6 }}>Search</div>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Type a player name..."
-            style={{ width: 280, padding: 6 }}
+            style={{
+              width: 300,
+              padding: 10,
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(0,0,0,0.25)",
+              color: "#fff",
+              outline: "none",
+            }}
           />
         </div>
 
         <div>
-          <label style={{ display: "block", marginBottom: 6 }}>Position</label>
-          <select value={posFilter} onChange={(e) => setPosFilter(e.target.value)} style={{ padding: 6 }}>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", marginBottom: 6 }}>Position</div>
+          <select
+            value={posFilter}
+            onChange={(e) => setPosFilter(e.target.value)}
+            style={{
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(0,0,0,0.25)",
+              color: "#fff",
+            }}
+          >
             {POSITIONS.map((p) => (
               <option key={p} value={p}>
                 {p}
@@ -201,97 +210,129 @@ export default function DraftPlanner() {
           </select>
         </div>
 
-        <div style={{ alignSelf: "end" }}>
-          <button onClick={clearDraft}>Clear Draft</button>
-        </div>
+        <button
+          onClick={clearDraft}
+          style={{
+            padding: "10px 14px",
+            borderRadius: 12,
+            border: "1px solid rgba(255,255,255,0.16)",
+            background: "rgba(255,255,255,0.06)",
+            color: "#fff",
+            cursor: "pointer",
+            fontWeight: 700,
+          }}
+        >
+          Clear Draft
+        </button>
       </div>
 
-      {loading ? (
-        <Loading text="Loading rankings..." />
+      {loading || loadingLeague ? (
+        <Loading text="Loading draft planner..." />
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 22 }}>
           {/* Available board */}
           <div>
             <h3>Available Players ({availablePlayers.length})</h3>
 
-            <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%" }}>
+            <table style={tableStyle}>
               <thead>
                 <tr>
-                  <th>#</th>
-                  <th>Name</th>
-                  <th>Pos</th>
-                  <th>Team</th>
+                  <th style={thStyle}>#</th>
+                  <th style={thStyle}>Name</th>
+                  <th style={thStyle}>Pos</th>
+                  <th style={thStyle}>Team</th>
 
-                  <th>FG%</th>
-                  <th>FT%</th>
-                  <th>3PM</th>
-                  <th>PTS</th>
-                  <th>REB</th>
-                  <th>AST</th>
-                  <th>STL</th>
-                  <th>BLK</th>
-                  <th>TOV</th>
+                  <th style={thStyle}>FG%</th>
+                  <th style={thStyle}>FT%</th>
+                  <th style={thStyle}>3PM</th>
+                  <th style={thStyle}>PTS</th>
+                  <th style={thStyle}>REB</th>
+                  <th style={thStyle}>AST</th>
+                  <th style={thStyle}>STL</th>
+                  <th style={thStyle}>BLK</th>
+                  <th style={thStyle}>TOV</th>
 
-                  <th>Combined</th>
-                  <th>Actions</th>
+                  <th style={thStyle}>Combined</th>
+                  <th style={thStyle}>Actions</th>
                 </tr>
               </thead>
 
               <tbody>
-                {availablePlayers.slice(0, 80).map((p, idx) => (
-                  <tr key={p.player_id}>
-                    <td>{idx + 1}</td>
-                    <td>{p.player_name}</td>
-                    <td>{p.position || "-"}</td>
-                    <td>{p.team || "-"}</td>
+                {availablePlayers.slice(0, 120).map((p, idx) => {
+                  const pid = p.player_id;
 
-                    {(() => {
-                      const s = statsById.get(p.player_id);
+                  const fg = getPct(pid, "fg_pct");
+                  const ft = getPct(pid, "ft_pct");
 
-                      const render = (key, fmt) => {
-                        const v = s?.[key];
-                        const num = Number(v);
-                        const { mean, std } = league[key] || { mean: 0, std: 0 };
-                        const z = std ? (num - mean) / std : 0;
+                  const three = getAvg(pid, "three_pm");
+                  const pts = getAvg(pid, "points");
+                  const reb = getAvg(pid, "rebounds");
+                  const ast = getAvg(pid, "assists");
+                  const stl = getAvg(pid, "steals");
+                  const blk = getAvg(pid, "blocks");
+                  const tov = getAvg(pid, "turnovers");
 
-                        // Turnovers are "bad", so invert for coloring
-                        const zForColor = key === "turnovers" ? -z : z;
+                  return (
+                    <tr key={pid}>
+                      <td style={tdBase}>{idx + 1}</td>
+                      <td style={{ ...tdBase, fontWeight: 700 }}>{p.player_name}</td>
+                      <td style={tdBase}>{getPos(pid) || p.position || "-"}</td>
+                      <td style={tdBase}>{getTeam(pid) || p.team || "-"}</td>
 
-                        return (
-                          <td key={key} style={{ textAlign: "right", ...cellStyle(zForColor) }}>
-                            {v === null || v === undefined || Number.isNaN(num) ? "-" : fmt(num)}
-                          </td>
-                        );
-                      };
+                      <StatCell value={fmtPct(fg)} z={zOf("fg_pct", fg)} />
+                      <StatCell value={fmtPct(ft)} z={zOf("ft_pct", ft)} />
 
-                      return (
-                        <>
-                          {render("fg_pct", (v) => v.toFixed(3))}
-                          {render("ft_pct", (v) => v.toFixed(3))}
-                          {render("three_pm", (v) => v.toFixed(1))}
-                          {render("points", (v) => v.toFixed(1))}
-                          {render("rebounds", (v) => v.toFixed(1))}
-                          {render("assists", (v) => v.toFixed(1))}
-                          {render("steals", (v) => v.toFixed(1))}
-                          {render("blocks", (v) => v.toFixed(1))}
-                          {render("turnovers", (v) => v.toFixed(1))}
-                        </>
-                      );
-                    })()}
+                      <StatCell value={fmt2(three)} z={zOf("three_pm", three)} />
+                      <StatCell value={fmt2(pts)} z={zOf("points", pts)} />
+                      <StatCell value={fmt2(reb)} z={zOf("rebounds", reb)} />
+                      <StatCell value={fmt2(ast)} z={zOf("assists", ast)} />
+                      <StatCell value={fmt2(stl)} z={zOf("steals", stl)} />
+                      <StatCell value={fmt2(blk)} z={zOf("blocks", blk)} />
+                      <StatCell value={fmt2(tov)} z={zOf("turnovers", tov)} invert />
 
-                    <td>{Number(p.combined_score || 0).toFixed(2)}</td>
+                      <td style={{ ...tdBase, textAlign: "right", fontWeight: 800 }}>
+                        {Number(p.combined_score || 0).toFixed(2)}
+                      </td>
 
-                    <td>
-                      <button onClick={() => draftToMyTeam(p.player_id)}>Draft (My Team)</button>{" "}
-                      <button onClick={() => markDrafted(p.player_id)}>Drafted</button>
-                    </td>
-                  </tr>
-                ))}
+                      <td style={{ ...tdBase, borderRight: "none" }}>
+                        <button
+                          onClick={() => draftToMyTeam(pid)}
+                          style={{
+                            padding: "8px 10px",
+                            borderRadius: 10,
+                            border: "1px solid rgba(255,255,255,0.16)",
+                            background: "rgba(255,255,255,0.06)",
+                            color: "#fff",
+                            cursor: "pointer",
+                            fontWeight: 700,
+                            marginRight: 8,
+                          }}
+                        >
+                          Draft (My Team)
+                        </button>
+                        <button
+                          onClick={() => markDrafted(pid)}
+                          style={{
+                            padding: "8px 10px",
+                            borderRadius: 10,
+                            border: "1px solid rgba(255,255,255,0.16)",
+                            background: "rgba(255,255,255,0.04)",
+                            color: "#fff",
+                            cursor: "pointer",
+                            fontWeight: 700,
+                          }}
+                        >
+                          Drafted
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
 
-            <div style={{ marginTop: 8, color: "#666" }}>
-              Showing first 80 available players (use search/filters to find others).
+            <div style={{ marginTop: 10, color: "rgba(255,255,255,0.65)" }}>
+              Showing first 120 available players (search/filters to narrow down).
             </div>
           </div>
 
@@ -300,7 +341,9 @@ export default function DraftPlanner() {
             <h3>My Team ({myTeamPlayers.length})</h3>
 
             {myTeamPlayers.length === 0 ? (
-              <p>No picks yet. Use “Draft (My Team)” on the left.</p>
+              <p style={{ color: "rgba(255,255,255,0.75)" }}>
+                No picks yet. Use “Draft (My Team)” on the left.
+              </p>
             ) : (
               <ul>
                 {myTeamPlayers.map((p) => (
@@ -312,14 +355,12 @@ export default function DraftPlanner() {
               </ul>
             )}
 
-            <h3 style={{ marginTop: 20 }}>
-              Drafted (Others) ({draftedIds.length - myTeamIds.length})
-            </h3>
-            <p style={{ color: "#666" }}>
+            <h3 style={{ marginTop: 20 }}>Drafted (Others) ({draftedIds.length - myTeamIds.length})</h3>
+            <p style={{ color: "rgba(255,255,255,0.65)" }}>
               Players you marked “Drafted” but not in your team.
             </p>
 
-            <div style={{ maxHeight: 260, overflow: "auto", border: "1px solid #ccc", padding: 10 }}>
+            <div style={{ maxHeight: 260, overflow: "auto", border: "1px solid rgba(255,255,255,0.12)", padding: 10, borderRadius: 12 }}>
               {draftedIds
                 .filter((id) => !myTeamSet.has(id))
                 .map((id) => players.find((p) => p.player_id === id))

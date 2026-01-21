@@ -6,64 +6,73 @@ import SeasonDropdown from "../components/SeasonDropdown";
 import { useSeason } from "../hooks/useSeason";
 import { getRotoRiskRankings, getActivePlayersStats } from "../api/fantasyApi";
 
-// ---------- helpers ----------
+// ---------- robust helpers ----------
 const num = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+};
+
+const pick = (obj, keys, fallback = null) => {
+  for (const k of keys) {
+    if (obj && obj[k] !== undefined && obj[k] !== null) return obj[k];
+  }
+  return fallback;
+};
+
+const getId = (row) => {
+  const raw = pick(row, ["id", "player_id"]);
+  const n = num(raw);
+  return n === null ? null : n;
+};
+
+const getStatsObj = (row) => {
+  if (!row) return null;
+  // backend now returns { totals, avg }, older used {stats}
+  return row.avg || row.totals || row.stats || null;
+};
+
+const getStat = (stats, key) => {
+  const map = {
+    fg_pct: ["fg_pct", "fg%", "fgp", "fgPct", "fgPercentage"],
+    ft_pct: ["ft_pct", "ft%", "ftp", "ftPct", "ftPercentage"],
+    three_pm: ["three_pm", "3pm", "threepm", "threes", "fg3m"],
+    points: ["points", "pts", "PTS"],
+    rebounds: ["rebounds", "reb", "REB"],
+    assists: ["assists", "ast", "AST"],
+    steals: ["steals", "stl", "STL"],
+    blocks: ["blocks", "blk", "BLK"],
+    turnovers: ["turnovers", "tov", "TOV"],
+  };
+  const keys = map[key] || [key];
+  return num(pick(stats, keys, null));
 };
 
 const fmtPct = (v) => {
   const n = num(v);
   return n === null ? "-" : n.toFixed(3);
 };
-
 const fmt2 = (v) => {
   const n = num(v);
   return n === null ? "-" : n.toFixed(2);
 };
 
-// clamp 0..1
-const clamp01 = (x) => Math.max(0, Math.min(1, x));
+// cell coloring
+const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
-// Linear interpolation between two numbers
-const lerp = (a, b, t) => a + (b - a) * t;
-
-// Color mix between red -> gray -> green
-// t=0 => redish, t=0.5 => neutral, t=1 => greenish
-const heatColor = (t) => {
-  const red = { r: 244, g: 67, b: 54 };     // #f44336
-  const mid = { r: 245, g: 245, b: 245 };   // #f5f5f5
-  const grn = { r: 76, g: 175, b: 80 };     // #4caf50
-
-  let c1, c2, tt;
-  if (t <= 0.5) {
-    c1 = red;
-    c2 = mid;
-    tt = t / 0.5;
-  } else {
-    c1 = mid;
-    c2 = grn;
-    tt = (t - 0.5) / 0.5;
+function bgFromZ(z, invert = false) {
+  if (z === null || z === undefined || Number.isNaN(z)) {
+    return { backgroundColor: "rgba(255,255,255,0.02)", color: "#e6edf3" };
   }
+  const val = invert ? -z : z;
+  const t = clamp(Math.abs(val) / 2.25, 0, 1);
+  const alpha = 0.08 + t * 0.50;
 
-  const r = Math.round(lerp(c1.r, c2.r, tt));
-  const g = Math.round(lerp(c1.g, c2.g, tt));
-  const b = Math.round(lerp(c1.b, c2.b, tt));
-  return `rgb(${r}, ${g}, ${b})`;
-};
+  const good = "34,197,94";
+  const bad = "239,68,68";
+  const rgb = val >= 0 ? good : bad;
 
-// Choose black/white text depending on background brightness
-const readableTextColor = (bgRgb) => {
-  // bgRgb like "rgb(r,g,b)"
-  const m = bgRgb.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-  if (!m) return "#111";
-  const r = Number(m[1]), g = Number(m[2]), b = Number(m[3]);
-  // perceived luminance
-  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return lum < 160 ? "#fff" : "#111";
-};
-
-// -----------------------------------
+  return { backgroundColor: `rgba(${rgb}, ${alpha})`, color: "#f8fafc" };
+}
 
 export default function Dashboard() {
   const { season, setSeason, seasons } = useSeason();
@@ -71,9 +80,13 @@ export default function Dashboard() {
   const [riskWeight, setRiskWeight] = useState(0.25);
 
   const [rankings, setRankings] = useState([]);
-  const [statsList, setStatsList] = useState([]); // raw stats objects from /active_players_stats
+  const [statsById, setStatsById] = useState(new Map());
 
   const [loading, setLoading] = useState(true);
+
+  // Search + pagination
+  const [search, setSearch] = useState("");
+  const [visibleCount, setVisibleCount] = useState(50);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,7 +102,13 @@ export default function Dashboard() {
         if (cancelled) return;
 
         setRankings(ranksRes.data || []);
-        setStatsList(statsRes.data || []);
+
+        const m = new Map();
+        (statsRes.data || []).forEach((row) => {
+          const id = getId(row);
+          if (id !== null) m.set(id, row);
+        });
+        setStatsById(m);
       } catch (err) {
         console.error(err);
         alert("Failed to load dashboard. Check backend + CORS.");
@@ -104,18 +123,45 @@ export default function Dashboard() {
     };
   }, [season, riskWeight]);
 
-  // Map stats by id for quick lookup
-  const statsById = useMemo(() => {
+  // Reset pagination when search/season/risk changes
+  useEffect(() => {
+    setVisibleCount(50);
+  }, [search, season, riskWeight]);
+
+  // Build rank lookup so # column is always the true rank
+  const rankByPlayerId = useMemo(() => {
     const m = new Map();
-    (statsList || []).forEach((row) => {
-      const id = num(row?.id ?? row?.player_id);
-      if (id !== null) m.set(id, row);
+    (rankings || []).forEach((r, idx) => {
+      m.set(Number(r.player_id), idx + 1); // 1-based rank
     });
     return m;
-  }, [statsList]);
+  }, [rankings]);
 
-  // Compute league min/max for each stat (using avg)
-  const leagueMinMax = useMemo(() => {
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rankings || [];
+
+    return (rankings || []).filter((r) => {
+      const pid = Number(r.player_id);
+      const row = statsById.get(pid);
+
+      const name = String(r.player_name || "").toLowerCase();
+      const team = String(pick(row, ["team"], "") || "").toLowerCase();
+      const pos = String(pick(row, ["position"], "") || "").toLowerCase();
+
+      return name.includes(q) || team.includes(q) || pos.includes(q);
+    });
+  }, [rankings, search, statsById]);
+
+  const shown = useMemo(
+    () => (filtered || []).slice(0, visibleCount),
+    [filtered, visibleCount]
+  );
+
+  const canShowMore = visibleCount < (filtered?.length || 0);
+
+  // league z-score: estimate from the FULL list you're working with
+  const league = useMemo(() => {
     const keys = [
       "fg_pct",
       "ft_pct",
@@ -127,140 +173,269 @@ export default function Dashboard() {
       "blocks",
       "turnovers",
     ];
+    const vals = {};
+    keys.forEach((k) => (vals[k] = []));
 
-    const mm = {};
-    keys.forEach((k) => (mm[k] = { min: Infinity, max: -Infinity }));
+    (rankings || []).forEach((r) => {
+      const row = statsById.get(Number(r.player_id));
+      const stats = getStatsObj(row);
+      if (!stats) return;
 
-    (statsList || []).forEach((row) => {
-      const a = row?.avg || {};
       keys.forEach((k) => {
-        const v = num(a[k]);
-        if (v === null) return;
-        if (v < mm[k].min) mm[k].min = v;
-        if (v > mm[k].max) mm[k].max = v;
+        const v = getStat(stats, k);
+        if (v !== null) vals[k].push(v);
       });
     });
 
-    // handle empty/Infinity cases
+    const mean = {};
+    const std = {};
     keys.forEach((k) => {
-      if (!Number.isFinite(mm[k].min) || !Number.isFinite(mm[k].max)) {
-        mm[k] = { min: 0, max: 1 };
+      const arr = vals[k];
+      if (!arr.length) {
+        mean[k] = 0;
+        std[k] = 1;
+        return;
       }
-      if (mm[k].min === mm[k].max) {
-        // avoid divide-by-zero later
-        mm[k].max = mm[k].min + 1;
-      }
+      const m = arr.reduce((a, b) => a + b, 0) / arr.length;
+      const s =
+        Math.sqrt(arr.reduce((a, b) => a + (b - m) * (b - m), 0) / arr.length) ||
+        1;
+      mean[k] = m;
+      std[k] = s;
     });
 
-    return mm;
-  }, [statsList]);
+    return { mean, std };
+  }, [rankings, statsById]);
 
-  const top50 = useMemo(() => (rankings || []).slice(0, 50), [rankings]);
+  const zOf = (key, v) => {
+    const n = num(v);
+    if (n === null) return null;
+    const m = league.mean[key];
+    const s = league.std[key];
+    if (!s) return null;
+    return (n - m) / s;
+  };
 
-  // stat cell style helper (background colored)
-  const statCellStyle = (key, value) => {
-    const v = num(value);
-    if (v === null) return { textAlign: "right" };
+  const tdBase = {
+    padding: "10px 10px",
+    borderBottom: "1px solid rgba(255,255,255,0.08)",
+    borderRight: "1px solid rgba(255,255,255,0.06)",
+    color: "#e6edf3",
+    background: "transparent",
+    whiteSpace: "nowrap",
+    fontSize: 13,
+  };
 
-    // turnovers are "bad" when higher => invert heat
-    const invert = key === "turnovers";
+  const thStyle = {
+    textAlign: "left",
+    padding: "10px 10px",
+    fontSize: 12,
+    letterSpacing: 0.2,
+    color: "rgba(255,255,255,0.75)",
+    borderBottom: "1px solid rgba(255,255,255,0.10)",
+    background: "rgba(255,255,255,0.04)",
+    whiteSpace: "nowrap",
+  };
 
-    const { min, max } = leagueMinMax[key] || { min: 0, max: 1 };
-    let t = (v - min) / (max - min);
-    t = clamp01(t);
-    if (invert) t = 1 - t;
+  const tableStyle = {
+    width: "100%",
+    borderCollapse: "separate",
+    borderSpacing: 0,
+    overflow: "hidden",
+    borderRadius: 14,
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid rgba(255,255,255,0.08)",
+  };
 
-    const bg = heatColor(t);
-    const color = readableTextColor(bg);
-
-    return {
-      textAlign: "right",
-      background: bg,
-      color,
-      fontWeight: 700,
-    };
+  const buttonStyle = {
+    padding: "10px 14px",
+    borderRadius: 12,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(255,255,255,0.06)",
+    color: "#fff",
+    cursor: "pointer",
+    fontWeight: 800,
   };
 
   return (
     <div>
       <h2>Dashboard</h2>
-      <p>Top 50 players by roto + durability. Showing {season} averages.</p>
+      <p style={{ color: "rgba(255,255,255,0.75)" }}>
+        Players by roto + durability. Showing {season} averages.
+      </p>
 
-      <SeasonDropdown value={season} onChange={setSeason} seasons={seasons} />
-      <RiskSlider value={riskWeight} onChange={setRiskWeight} />
+      <div
+        style={{
+          display: "flex",
+          gap: 14,
+          flexWrap: "wrap",
+          alignItems: "end",
+          marginBottom: 14,
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: 12,
+              color: "rgba(255,255,255,0.65)",
+              marginBottom: 6,
+            }}
+          >
+            Season
+          </div>
+          <SeasonDropdown value={season} onChange={setSeason} seasons={seasons} />
+        </div>
+
+        <div style={{ minWidth: 340 }}>
+          <div
+            style={{
+              fontSize: 12,
+              color: "rgba(255,255,255,0.65)",
+              marginBottom: 6,
+            }}
+          >
+            Risk Weight: <b style={{ color: "#fff" }}>{riskWeight.toFixed(2)}</b>
+          </div>
+          <RiskSlider value={riskWeight} onChange={setRiskWeight} />
+        </div>
+
+        <div>
+          <div
+            style={{
+              fontSize: 12,
+              color: "rgba(255,255,255,0.65)",
+              marginBottom: 6,
+            }}
+          >
+            Search
+          </div>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, team, or position..."
+            style={{
+              width: 320,
+              padding: 10,
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(0,0,0,0.25)",
+              color: "#fff",
+              outline: "none",
+            }}
+          />
+          <div style={{ marginTop: 6, color: "rgba(255,255,255,0.65)" }}>
+            Showing {Math.min(visibleCount, filtered.length)} of {filtered.length}
+          </div>
+        </div>
+      </div>
 
       {loading ? (
         <Loading text="Loading dashboard..." />
       ) : (
-        <table
-          border="1"
-          cellPadding="8"
-          style={{ borderCollapse: "collapse", width: "100%" }}
-        >
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Name</th>
-              <th>Pos</th>
-              <th>Team</th>
+        <>
+          <table style={tableStyle}>
+            <thead>
+              <tr>
+                <th style={thStyle}>#</th>
+                <th style={thStyle}>Name</th>
+                <th style={thStyle}>Pos</th>
+                <th style={thStyle}>Team</th>
 
-              <th>FG%</th>
-              <th>FT%</th>
-              <th>3PM</th>
-              <th>PTS</th>
-              <th>REB</th>
-              <th>AST</th>
-              <th>STL</th>
-              <th>BLK</th>
-              <th>TOV</th>
+                <th style={thStyle}>FG%</th>
+                <th style={thStyle}>FT%</th>
+                <th style={thStyle}>3PM</th>
+                <th style={thStyle}>PTS</th>
+                <th style={thStyle}>REB</th>
+                <th style={thStyle}>AST</th>
+                <th style={thStyle}>STL</th>
+                <th style={thStyle}>BLK</th>
+                <th style={thStyle}>TOV</th>
 
-              <th>Roto</th>
-              <th>Risk%</th>
-              <th>Combined</th>
-            </tr>
-          </thead>
+                <th style={thStyle}>Roto</th>
+                <th style={thStyle}>Risk%</th>
+                <th style={thStyle}>Combined</th>
+              </tr>
+            </thead>
 
-          <tbody>
-            {top50.map((r, idx) => {
-              const pid = Number(r.player_id);
-              const row = statsById.get(pid);
+            <tbody>
+              {shown.map((r) => {
+                const pid = Number(r.player_id);
+                const row = statsById.get(pid);
+                const stats = getStatsObj(row) || {};
+                const team = pick(row, ["team"], "-");
+                const pos = pick(row, ["position"], "-");
 
-              const a = row?.avg || {};
-              const pos = row?.position || "-";
-              const team = row?.team || "-";
+                const fg = getStat(stats, "fg_pct");
+                const ft = getStat(stats, "ft_pct");
+                const three = getStat(stats, "three_pm");
+                const pts = getStat(stats, "points");
+                const reb = getStat(stats, "rebounds");
+                const ast = getStat(stats, "assists");
+                const stl = getStat(stats, "steals");
+                const blk = getStat(stats, "blocks");
+                const tov = getStat(stats, "turnovers");
 
-              return (
-                <tr key={pid}>
-                  <td>{idx + 1}</td>
-                  <td>{r.player_name}</td>
-                  <td>{pos}</td>
-                  <td>{team}</td>
+                const trueRank = rankByPlayerId.get(pid) ?? "-";
 
-                  <td style={statCellStyle("fg_pct", a.fg_pct)}>{fmtPct(a.fg_pct)}</td>
-                  <td style={statCellStyle("ft_pct", a.ft_pct)}>{fmtPct(a.ft_pct)}</td>
+                return (
+                  <tr key={pid}>
+                    <td style={tdBase}>{trueRank}</td>
+                    <td style={{ ...tdBase, fontWeight: 800 }}>{r.player_name}</td>
+                    <td style={tdBase}>{pos}</td>
+                    <td style={tdBase}>{team}</td>
 
-                  <td style={statCellStyle("three_pm", a.three_pm)}>{fmt2(a.three_pm)}</td>
-                  <td style={statCellStyle("points", a.points)}>{fmt2(a.points)}</td>
-                  <td style={statCellStyle("rebounds", a.rebounds)}>{fmt2(a.rebounds)}</td>
-                  <td style={statCellStyle("assists", a.assists)}>{fmt2(a.assists)}</td>
-                  <td style={statCellStyle("steals", a.steals)}>{fmt2(a.steals)}</td>
-                  <td style={statCellStyle("blocks", a.blocks)}>{fmt2(a.blocks)}</td>
-                  <td style={statCellStyle("turnovers", a.turnovers)}>{fmt2(a.turnovers)}</td>
+                    <td style={{ ...tdBase, textAlign: "right", ...bgFromZ(zOf("fg_pct", fg)) }}>
+                      {fmtPct(fg)}
+                    </td>
+                    <td style={{ ...tdBase, textAlign: "right", ...bgFromZ(zOf("ft_pct", ft)) }}>
+                      {fmtPct(ft)}
+                    </td>
 
-                  <td style={{ textAlign: "right" }}>
-                    {Number(r.total_score ?? 0).toFixed(2)}
-                  </td>
-                  <td style={{ textAlign: "right" }}>
-                    {(Number(r.risk_raw ?? 0) * 100).toFixed(1)}%
-                  </td>
-                  <td style={{ textAlign: "right" }}>
-                    {Number(r.combined_score ?? 0).toFixed(2)}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                    <td style={{ ...tdBase, textAlign: "right", ...bgFromZ(zOf("three_pm", three)) }}>
+                      {fmt2(three)}
+                    </td>
+                    <td style={{ ...tdBase, textAlign: "right", ...bgFromZ(zOf("points", pts)) }}>
+                      {fmt2(pts)}
+                    </td>
+                    <td style={{ ...tdBase, textAlign: "right", ...bgFromZ(zOf("rebounds", reb)) }}>
+                      {fmt2(reb)}
+                    </td>
+                    <td style={{ ...tdBase, textAlign: "right", ...bgFromZ(zOf("assists", ast)) }}>
+                      {fmt2(ast)}
+                    </td>
+                    <td style={{ ...tdBase, textAlign: "right", ...bgFromZ(zOf("steals", stl)) }}>
+                      {fmt2(stl)}
+                    </td>
+                    <td style={{ ...tdBase, textAlign: "right", ...bgFromZ(zOf("blocks", blk)) }}>
+                      {fmt2(blk)}
+                    </td>
+                    <td style={{ ...tdBase, textAlign: "right", ...bgFromZ(zOf("turnovers", tov), true) }}>
+                      {fmt2(tov)}
+                    </td>
+
+                    <td style={{ ...tdBase, textAlign: "right" }}>
+                      {Number(r.total_score ?? 0).toFixed(2)}
+                    </td>
+                    <td style={{ ...tdBase, textAlign: "right" }}>
+                      {(Number(r.risk_raw ?? 0) * 100).toFixed(1)}%
+                    </td>
+                    <td style={{ ...tdBase, textAlign: "right", fontWeight: 900, borderRight: "none" }}>
+                      {Number(r.combined_score ?? 0).toFixed(2)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          {canShowMore && (
+            <div style={{ marginTop: 12 }}>
+              <button onClick={() => setVisibleCount((n) => n + 50)} style={buttonStyle}>
+                Show more
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

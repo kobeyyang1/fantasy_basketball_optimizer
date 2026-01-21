@@ -1,55 +1,87 @@
+// src/api/fantasyApi.js
 import axios from "axios";
 
 const api = axios.create({
   baseURL: "http://localhost:8000",
 });
 
-export const getRotoRiskRankings = (params = {}) =>
-  api.get("/fantasy/roto_risk_rankings", {
+const DEFAULT_SEASON = "2024-25";
+const SEASON_STORAGE_KEY = "selectedSeason_v1";
+
+function getSeasonFallback() {
+  const saved = localStorage.getItem(SEASON_STORAGE_KEY);
+  return saved || DEFAULT_SEASON;
+}
+
+// --- Dashboard rankings ---
+export const getRotoRiskRankings = (params = {}) => {
+  const season = params.season ?? getSeasonFallback();
+
+  return api.get("/fantasy/roto_risk_rankings", {
     params: {
-      season: params.season,
+      season,
       risk_weight: params.risk_weight ?? 0.25,
       punt: params.punt,
       limit: params.limit,
     },
   });
+};
 
 // --- Team suggestions (Optimizer) ---
-export const getTeamSuggestions = (params = {}) =>
-  api.get("/fantasy/team_suggestions", {
+export const getTeamSuggestions = (params = {}) => {
+  const season = params.season ?? getSeasonFallback();
+
+  return api.get("/fantasy/team_suggestions", {
     params: {
       player_ids: params.player_ids,
       punt: params.punt,
       limit: params.limit ?? 20,
-      season: params.season,
+      season,
     },
   });
+};
 
-export const getMLRankings = (params = {}) =>
-  api.get("/fantasy/ml_rankings", {
+// --- ML rankings + explainability ---
+export const getMLRankings = (params = {}) => {
+  const season = params.season ?? getSeasonFallback();
+
+  return api.get("/fantasy/ml_rankings", {
     params: {
-      season: params.season ?? "2024-25",
+      season,
       limit: params.limit ?? 50,
     },
   });
+};
 
-export const getMLExplain = (playerId, params = {}) =>
-  api.get(`/fantasy/ml_explain/${playerId}`, {
-    params: {
-      season: params.season ?? "2024-25",
-    },
+export const getMLExplain = (playerId, params = {}) => {
+  const season = params.season ?? getSeasonFallback();
+
+  return api.get(`/fantasy/ml_explain/${playerId}`, {
+    params: { season },
   });
+};
 
+// --- Player list for picker ---
 export const getPlayersWithStats = () =>
   api.get("/fantasy/players_active_with_stats");
 
-// --- Active players stats (for per-game display) ---
-export const getActivePlayersStats = (params = {}) =>
-  api.get("/fantasy/active_players_stats", { params });
+// --- Active players stats (per-game display) ---
+// IMPORTANT: always includes season, otherwise backend returns 422
+export const getActivePlayersStats = (params = {}) => {
+  const season = params.season ?? getSeasonFallback();
 
-export const getExplainabilityList = (params = {}) =>
-  api.get("/fantasy/roto_risk_rankings", { params });
+  return api.get("/fantasy/active_players_stats", {
+    params: { ...params, season },
+  });
+};
 
+// Explainability list uses roto rankings with risk_weight=0 on frontend
+export const getExplainabilityList = (params = {}) => {
+  const season = params.season ?? getSeasonFallback();
 
+  return api.get("/fantasy/roto_risk_rankings", {
+    params: { ...params, season },
+  });
+};
 
-
+export default api;
