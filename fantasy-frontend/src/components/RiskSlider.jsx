@@ -1,17 +1,37 @@
-export default function RiskSlider({ value, onChange }) {
+// src/components/RiskSlider.jsx
+import React from "react";
+
+export default function RiskSlider({
+  value,
+  onChange,
+  label = "Availability Weight",
+  showLabel = true,
+  min = 0,
+  max = 1,
+  step = 0.05,
+  width = 520,
+}) {
   return (
-    <div style={{ margin: "12px 0" }}>
-      <div style={{ marginBottom: "6px" }}>
-        Risk Weight: <b>{value}</b>
-      </div>
+    <div style={{ width }}>
+      {showLabel && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)" }}>
+            {label}:{" "}
+            <span style={{ color: "#fff", fontWeight: 800 }}>
+              {Number(value).toFixed(2)}
+            </span>
+          </div>
+        </div>
+      )}
+
       <input
         type="range"
-        min="0"
-        max="1"
-        step="0.05"
+        min={min}
+        max={max}
+        step={step}
         value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        style={{ width: 320 }}
+        onChange={(e) => onChange?.(Number(e.target.value))}
+        style={{ width: "100%" }}
       />
     </div>
   );

@@ -261,7 +261,7 @@ export default function Dashboard() {
     <div>
       <h2>Dashboard</h2>
       <p style={{ color: "rgba(255,255,255,0.75)" }}>
-        Players by roto + durability. Showing {season} averages.
+        Players by roto + availability. Showing {season} averages.
       </p>
 
       <div
@@ -281,7 +281,6 @@ export default function Dashboard() {
               marginBottom: 6,
             }}
           >
-            Season
           </div>
           <SeasonDropdown value={season} onChange={setSeason} seasons={seasons} />
         </div>
@@ -294,7 +293,6 @@ export default function Dashboard() {
               marginBottom: 6,
             }}
           >
-            Risk Weight: <b style={{ color: "#fff" }}>{riskWeight.toFixed(2)}</b>
           </div>
           <RiskSlider value={riskWeight} onChange={setRiskWeight} />
         </div>
@@ -352,7 +350,7 @@ export default function Dashboard() {
                 <th style={thStyle}>TOV</th>
 
                 <th style={thStyle}>Roto</th>
-                <th style={thStyle}>Risk%</th>
+                <th style={thStyle}>Availability %</th>
                 <th style={thStyle}>Combined</th>
               </tr>
             </thead>
