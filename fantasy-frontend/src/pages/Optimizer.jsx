@@ -10,10 +10,19 @@ import { getRotoRiskRankings, getActivePlayersStats, getPlayersWithStats } from 
 const DEFAULT_ROUNDS = 9;
 const DEFAULT_SLOTS = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL", "UTIL"];
 
-const ALL_CATS = ["fg_pct", "ft_pct", "three_pm", "points", "rebounds", "assists", "steals", "blocks", "turnovers"];
-const INVERTED = new Set(["turnovers"]);
+const ALL_CATS = [
+  "fg_pct",
+  "ft_pct",
+  "three_pm",
+  "points",
+  "rebounds",
+  "assists",
+  "steals",
+  "blocks",
+  "turnovers",
+];
 
-// -------- helpers ----------
+// ---------------- helpers ----------------
 const num = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -29,9 +38,12 @@ function snakePick(leagueSize, draftSlot1Indexed, round1Indexed) {
   return r * n - slot + 1;
 }
 
-// probability player is still available at your pick given their "rank"
+// Probability player is still there at your pick, given their overall “rank”.
+// Higher rank number = later pick = more likely available.
 function availabilityProb(rank, pick) {
-  const x = (pick - rank) / 8; // softness
+  // rank smaller = earlier pick (harder to still be available later)
+  const softness = 6; // tweak: higher = softer curve
+  const x = (rank - pick) / softness; // ✅ flipped
   return 1 / (1 + Math.exp(-x));
 }
 
@@ -76,27 +88,13 @@ function canFillSlot(playerEligible, slot) {
   return playerEligible.includes(slot);
 }
 
-// z-score using league mean/stdev from useLeagueStats
-function zScore(cat, value, league) {
-  const v = num(value);
-  if (v === null) return null;
-
-  const mean = num(league?.means?.[cat]);
-  const sd = num(league?.stdevs?.[cat]);
-  if (mean === null || sd === null || sd <= 1e-9) return null;
-
-  let z = (v - mean) / sd;
-  if (INVERTED.has(cat)) z = -z; // turnovers inverted
-  return z;
-}
-
 function weightForCat(cat, focusCats, puntCats) {
   if (puntCats.includes(cat)) return 0;
-  if (focusCats.includes(cat)) return 1.35;
+  if (focusCats.includes(cat)) return 1.8; // stronger focus influence
   return 1.0;
 }
 
-// -------- targets + diminishing returns ----------
+// ---------------- targets + diminishing returns ----------------
 function buildTargets({ focusCats, puntCats }) {
   const targets = {};
   for (const cat of ALL_CATS) {
@@ -104,7 +102,7 @@ function buildTargets({ focusCats, puntCats }) {
       targets[cat] = 0;
       continue;
     }
-    targets[cat] = focusCats.includes(cat) ? 4.0 : 2.0;
+    targets[cat] = focusCats.includes(cat) ? 4.5 : 2.2;
   }
   return targets;
 }
@@ -119,6 +117,7 @@ function progressTowardTarget(teamZ, targetZ) {
 
 function marginalCategoryGain({ teamZByCat, candZByCat, targets, focusCats, puntCats }) {
   let gain = 0;
+
   for (const cat of ALL_CATS) {
     const w = weightForCat(cat, focusCats, puntCats);
     if (w === 0) continue;
@@ -134,22 +133,36 @@ function marginalCategoryGain({ teamZByCat, candZByCat, targets, focusCats, punt
 
     gain += w * (p1 - p0);
   }
+
   return gain;
 }
 
-function candidateZVector(player, league) {
-  const avg = player?.avg || {};
+// ✅ Use backend z_scores so locks/focus really change output (and matches rankings)
+function candidateZVectorFromRankings(playerId, zById) {
+  const z = zById.get(playerId) || {};
   const out = {};
-  for (const cat of ALL_CATS) {
-    const z = zScore(cat, avg?.[cat], league);
-    out[cat] = z ?? 0;
-  }
+  for (const cat of ALL_CATS) out[cat] = Number(z[cat] ?? 0) || 0;
   return out;
 }
 
-function scoreCandidateStep2({ player, teamZByCat, focusCats, puntCats, pick, rank, riskRaw, league }) {
+/**
+ * Scoring:
+ * - catGain dominates (locks/focus must matter)
+ * - reachPressure/durability are nudges
+ * - antiOverstack reduces piling into already-won categories
+ */
+function scoreCandidate({
+  playerId,
+  zById,
+  teamZByCat,
+  focusCats,
+  puntCats,
+  pick,
+  rank,
+  riskRaw,
+}) {
   const targets = buildTargets({ focusCats, puntCats });
-  const candZByCat = candidateZVector(player, league);
+  const candZByCat = candidateZVectorFromRankings(playerId, zById);
 
   const catGain = marginalCategoryGain({
     teamZByCat,
@@ -160,32 +173,74 @@ function scoreCandidateStep2({ player, teamZByCat, focusCats, puntCats, pick, ra
   });
 
   const prob = availabilityProb(rank, pick);
-  const reachPressure = 0.5 - prob;
+  const reachPressure = 1 - prob; // higher when prob is low
   const dur = num(riskRaw) ?? 0;
 
-  const score = catGain * 10.0 + reachPressure * 1.25 + dur * 0.75;
+  let antiOverstack = 0;
+  for (const cat of ALL_CATS) {
+    if (puntCats.includes(cat)) continue;
+    const t = targets[cat] ?? 0;
+    if (t <= 0) continue;
+
+    const prog = progressTowardTarget(teamZByCat[cat] ?? 0, t);
+    if (prog >= 0.85) {
+      const dz = candZByCat[cat] ?? 0;
+      if (dz > 0) antiOverstack += 0.06 * dz;
+    }
+  }
+
+  const score =
+    catGain * 40.0 + // BIG driver
+    dur * 0.9 +
+    reachPressure * 0.6 -
+    antiOverstack * 3.0;
+
   return { score, prob, catGain };
 }
 
-function buildLineup({ leagueSize, draftSlot, rounds, slots, focusCats, puntCats, lockedIds, rankings, statsById, league }) {
+function buildLineup({
+  leagueSize,
+  draftSlot,
+  rounds,
+  slots,
+  focusCats,
+  puntCats,
+  lockedIds,
+  rankings,
+  statsById,
+}) {
+  // player_id -> overall rank (1..N)
   const rankMap = new Map();
   rankings.forEach((r, idx) => rankMap.set(r.player_id, idx + 1));
+
+  // player_id -> z_scores (from backend)
+  const zById = new Map();
+  rankings.forEach((r) => zById.set(r.player_id, r.z_scores || {}));
+
+  // quick lookup of ranking row by id (for names / risk)
+  const rankRowById = new Map();
+  rankings.forEach((r) => rankRowById.set(r.player_id, r));
 
   const chosen = [];
   const usedIds = new Set();
 
+  // team z accumulation
   const teamZByCat = {};
   for (const cat of ALL_CATS) teamZByCat[cat] = 0;
 
-  // add locks first
-  for (const id of lockedIds) {
+  // ---------- Locks consume early rounds ----------
+  // Lock #1 = Round 1 pick, Lock #2 = Round 2 pick, etc.
+  lockedIds.forEach((id, i) => {
     const s = statsById.get(id);
-    const r = rankings.find((x) => x.player_id === id);
-    if (!s || !r) continue;
+    const r = rankRowById.get(id);
+    if (!s || !r) return;
+
+    const round = i + 1;
+    const overall = snakePick(leagueSize, draftSlot, round);
 
     chosen.push({
-      round: null,
-      overall: null,
+      round,
+      overall,
       player_id: id,
       name: r.player_name,
       pos: s.position || "-",
@@ -195,15 +250,14 @@ function buildLineup({ leagueSize, draftSlot, rounds, slots, focusCats, puntCats
       availability: null,
     });
 
-    const zvec = candidateZVector(s, league);
+    const zvec = candidateZVectorFromRankings(id, zById);
     for (const cat of ALL_CATS) teamZByCat[cat] += zvec[cat] ?? 0;
 
     usedIds.add(id);
-  }
+  });
 
+  // slots remaining and assign slots for locks first
   const slotsRemaining = [...slots];
-
-  // assign slots for locks
   for (const pick of chosen) {
     const eligible = normalizePos(pick.pos);
     const idx = slotsRemaining.findIndex((slot) => canFillSlot(eligible, slot));
@@ -215,9 +269,8 @@ function buildLineup({ leagueSize, draftSlot, rounds, slots, focusCats, puntCats
     }
   }
 
-  // IMPORTANT: rounds start AFTER locks (locks are your earliest picks)
-  const locksN = chosen.filter((x) => x.note === "LOCK").length;
-  const startRound = locksN + 1;
+  // Start drafting AFTER locks
+  const startRound = chosen.length + 1;
 
   for (let round = startRound; round <= rounds; round++) {
     if (chosen.length >= slots.length) break;
@@ -225,6 +278,7 @@ function buildLineup({ leagueSize, draftSlot, rounds, slots, focusCats, puntCats
 
     const overall = snakePick(leagueSize, draftSlot, round);
 
+    // candidate set: can fill remaining slots
     const candidates = [];
     for (const r of rankings) {
       const id = r.player_id;
@@ -238,7 +292,9 @@ function buildLineup({ leagueSize, draftSlot, rounds, slots, focusCats, puntCats
 
       const rank = rankMap.get(id) ?? 9999;
       const prob = availabilityProb(rank, overall);
-      if (prob < 0.10) continue;
+
+      // only filter truly impossible picks; allow some risk
+      if (prob < 0.15) continue;
 
       candidates.push({ r, s, rank });
     }
@@ -249,15 +305,15 @@ function buildLineup({ leagueSize, draftSlot, rounds, slots, focusCats, puntCats
     let bestScore = -Infinity;
 
     for (const c of candidates) {
-      const { score } = scoreCandidateStep2({
-        player: c.s,
+      const { score } = scoreCandidate({
+        playerId: c.r.player_id,
+        zById,
         teamZByCat,
         focusCats,
         puntCats,
         pick: overall,
         rank: c.rank,
         riskRaw: c.r.risk_raw,
-        league,
       });
 
       if (score > bestScore) {
@@ -269,16 +325,20 @@ function buildLineup({ leagueSize, draftSlot, rounds, slots, focusCats, puntCats
     if (!best) continue;
 
     const eligible = normalizePos(best.s.position);
+
+    // fill non-UTIL slots first
     let slotIdx = slotsRemaining.findIndex((slot) => slot !== "UTIL" && canFillSlot(eligible, slot));
     if (slotIdx < 0) slotIdx = slotsRemaining.findIndex((slot) => canFillSlot(eligible, slot));
 
     const assignedSlot = slotIdx >= 0 ? slotsRemaining[slotIdx] : "UTIL";
     if (slotIdx >= 0) slotsRemaining.splice(slotIdx, 1);
 
-    const zvec = candidateZVector(best.s, league);
+    // update team z (✅ from backend z_scores)
+    const zvec = candidateZVectorFromRankings(best.r.player_id, zById);
     for (const cat of ALL_CATS) teamZByCat[cat] += zvec[cat] ?? 0;
 
     usedIds.add(best.r.player_id);
+
     chosen.push({
       round,
       overall,
@@ -288,6 +348,7 @@ function buildLineup({ leagueSize, draftSlot, rounds, slots, focusCats, puntCats
       team: best.s.team || "-",
       slot: assignedSlot,
       availability: availabilityProb(best.rank, overall),
+      note: null,
     });
   }
 
@@ -296,7 +357,7 @@ function buildLineup({ leagueSize, draftSlot, rounds, slots, focusCats, puntCats
 
 export default function Optimizer() {
   const { season, setSeason, seasons } = useSeason();
-  const { league, loading: loadingLeague } = useLeagueStats();
+  const { league, loading: loadingLeague } = useLeagueStats(); // still used for UI/loading gating
 
   const [leagueSize, setLeagueSize] = useState(12);
   const [draftSlot, setDraftSlot] = useState(2);
@@ -316,7 +377,6 @@ export default function Optimizer() {
 
   const [lineups, setLineups] = useState([]);
 
-  // compact search
   const [lockQuery, setLockQuery] = useState("");
 
   useEffect(() => {
@@ -341,7 +401,7 @@ export default function Optimizer() {
     async function load() {
       try {
         const [ranksRes, statsRes] = await Promise.all([
-          getRotoRiskRankings({ season, risk_weight: 0, limit: 400 }),
+          getRotoRiskRankings({ season, risk_weight: 0, limit: 500 }),
           getActivePlayersStats({ season }),
         ]);
 
@@ -392,7 +452,11 @@ export default function Optimizer() {
   }, [lockQuery, allPlayers, disabledIds]);
 
   const generateLineups = () => {
-    if (!rankings.length || !statsById.size || !league) return;
+    // rankings + statsById are the true required inputs
+    if (!rankings.length || !statsById.size) {
+      alert("Still loading rankings/stats. Try again in a second.");
+      return;
+    }
 
     const lineup = buildLineup({
       leagueSize,
@@ -404,7 +468,6 @@ export default function Optimizer() {
       lockedIds,
       rankings,
       statsById,
-      league,
     });
 
     setLineups([
@@ -417,39 +480,12 @@ export default function Optimizer() {
     ]);
   };
 
-  // ---- display helpers: recompute Round/Overall so non-lock picks start AFTER locks ----
-  const displayLineup = (lineup) => {
-    const locks = lineup.filter((x) => x.note === "LOCK");
-    const others = lineup.filter((x) => x.note !== "LOCK");
-    const locksN = locks.length;
-
-    const withLocks = locks.map((p, idx) => {
-      const round = idx + 1;
-      return {
-        ...p,
-        round,
-        overall: snakePick(leagueSize, draftSlot, round),
-      };
-    });
-
-    const withOthers = others.map((p, idx) => {
-      const round = locksN + idx + 1;
-      return {
-        ...p,
-        round,
-        overall: snakePick(leagueSize, draftSlot, round),
-      };
-    });
-
-    return [...withLocks, ...withOthers];
-  };
-
   return (
     <div>
       <h2>Optimizer</h2>
       <p>
-        Builds lineups using <b>category targets + diminishing returns</b> so you don’t overstack one stat while
-        ignoring what you still need to win.
+        Builds lineups using <b>category targets + diminishing returns</b> so locks & focus categories actually
+        change the result.
       </p>
 
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", margin: "14px 0" }}>
@@ -498,7 +534,7 @@ export default function Optimizer() {
         </div>
       </div>
 
-      {/* Build-around: keep ONLY search, no giant list */}
+      {/* Build-around: search only */}
       <div style={{ marginTop: 10, maxWidth: 520 }}>
         <h3>Build around (optional — up to 3 players)</h3>
 
@@ -582,7 +618,7 @@ export default function Optimizer() {
       <div style={{ marginTop: 14 }}>
         <h3>Focus categories</h3>
         <div style={{ color: "#aaa", marginBottom: 8 }}>
-          Focus cats have higher target thresholds (so the build actively tries to “win” them).
+          Focus cats have higher target thresholds (the build actively tries to “win” them).
         </div>
         <PuntSelector value={focusCats} onChange={setFocusCats} />
       </div>
@@ -601,77 +637,73 @@ export default function Optimizer() {
         </div>
       ) : (
         <div style={{ marginTop: 18, display: "grid", gap: 14 }}>
-          {lineups.map((b) => {
-            const lineupForDisplay = displayLineup(b.lineup);
-
-            return (
-              <div
-                key={b.title}
-                style={{
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  borderRadius: 14,
-                  padding: 14,
-                  background: "rgba(255,255,255,0.03)",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                  <div>
-                    <div style={{ fontSize: 18, fontWeight: 800 }}>{b.title}</div>
-                    <div style={{ color: "#aaa", marginTop: 4 }}>
-                      Focus: <b style={{ color: "#fff" }}>{b.focus.join(", ") || "None"}</b>
-                      {b.punt?.length ? (
-                        <>
-                          {" "}
-                          • Punt: <b style={{ color: "#fff" }}>{b.punt.join(", ")}</b>
-                        </>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div style={{ color: "#aaa" }}>
-                    Slot {draftSlot} • {leagueSize} teams • {season}
+          {lineups.map((b) => (
+            <div
+              key={b.title}
+              style={{
+                border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 14,
+                padding: 14,
+                background: "rgba(255,255,255,0.03)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 800 }}>{b.title}</div>
+                  <div style={{ color: "#aaa", marginTop: 4 }}>
+                    Focus: <b style={{ color: "#fff" }}>{b.focus.join(", ") || "None"}</b>
+                    {b.punt?.length ? (
+                      <>
+                        {" "}
+                        • Punt: <b style={{ color: "#fff" }}>{b.punt.join(", ")}</b>
+                      </>
+                    ) : null}
                   </div>
                 </div>
-
-                <div style={{ marginTop: 12, overflowX: "auto" }}>
-                  <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%", minWidth: 720 }}>
-                    <thead>
-                      <tr>
-                        <th>Slot</th>
-                        <th>Round</th>
-                        <th>Overall</th>
-                        <th>Player</th>
-                        <th>Pos</th>
-                        <th>Team</th>
-                        <th>Availability</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lineupForDisplay.map((p, i) => (
-                        <tr key={`${p.player_id}-${i}`}>
-                          <td>{p.slot || "-"}</td>
-                          <td>{p.round ?? "-"}</td>
-                          <td>{p.overall ?? "-"}</td>
-                          <td>
-                            <b>{p.name}</b>{" "}
-                            {p.note ? <span style={{ color: "#ffd166" }}>({p.note})</span> : null}
-                          </td>
-                          <td>{p.pos}</td>
-                          <td>{p.team}</td>
-                          <td style={{ textAlign: "right" }}>
-                            {p.note === "LOCK" ? "Locked" : `${Math.round((p.availability ?? 0) * 100)}%`}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div style={{ marginTop: 8, color: "#aaa" }}>
-                  Note: picks are driven by “what your team still needs” rather than raw best-player scoring.
+                <div style={{ color: "#aaa" }}>
+                  Slot {draftSlot} • {leagueSize} teams • {season}
                 </div>
               </div>
-            );
-          })}
+
+              <div style={{ marginTop: 12, overflowX: "auto" }}>
+                <table border="1" cellPadding="8" style={{ borderCollapse: "collapse", width: "100%", minWidth: 720 }}>
+                  <thead>
+                    <tr>
+                      <th>Slot</th>
+                      <th>Round</th>
+                      <th>Overall</th>
+                      <th>Player</th>
+                      <th>Pos</th>
+                      <th>Team</th>
+                      <th>Availability</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {b.lineup.map((p, i) => (
+                      <tr key={`${p.player_id}-${i}`}>
+                        <td>{p.slot || "-"}</td>
+                        <td>{p.round ?? "-"}</td>
+                        <td>{p.overall ?? "-"}</td>
+                        <td>
+                          <b>{p.name}</b>{" "}
+                          {p.note ? <span style={{ color: "#ffd166" }}>({p.note})</span> : null}
+                        </td>
+                        <td>{p.pos}</td>
+                        <td>{p.team}</td>
+                        <td style={{ textAlign: "right" }}>
+                          {p.note === "LOCK" ? "Locked" : `${Math.round((p.availability ?? 0) * 100)}%`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ marginTop: 8, color: "#aaa" }}>
+                Note: picks are driven by “what your team still needs” — and locks consume your early rounds.
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
