@@ -115,7 +115,6 @@ def debug_db():
     return {"db_url": SQLALCHEMY_DATABASE_URL}
 
 
-# ---------- Existing endpoints ----------
 
 @router.get("/projections", response_model=List[PlayerProjection])
 def get_projections(
