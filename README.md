@@ -13,6 +13,8 @@ venv\Scripts\activate
 .\venv\Scripts\activate
 uvicorn app.main:app
 
+python -m uvicorn app.main:app --reload
+
 TO RUN FRONTEND
 Open cmd
 cd OneDrive\Desktop\FINAL YEAR PROJECT\fantasy-basketball\fantasy-frontend
