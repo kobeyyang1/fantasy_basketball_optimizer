@@ -1,11 +1,14 @@
 // src/App.jsx
 import { Routes, Route, Navigate } from "react-router-dom";
 import NavBar from "./components/NavBar";
+import RequireAuth from "./components/RequireAuth";
 
+import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Optimizer from "./pages/Optimizer";
 import DraftPlanner from "./pages/DraftPlanner";
 import Explainability from "./pages/Explainability";
+import Saved from "./pages/Saved";
 
 export default function App() {
   return (
@@ -15,16 +18,26 @@ export default function App() {
       <main style={styles.main}>
         <div style={styles.shell}>
           <Routes>
-            <Route path="/" element={<Dashboard />} />
+            {/* Public */}
+            <Route path="/login" element={<Login />} />
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/optimizer" element={<Optimizer />} />
             <Route path="/draft" element={<DraftPlanner />} />
-
-            {/* support BOTH paths */}
             <Route path="/explain" element={<Explainability />} />
             <Route path="/explainability" element={<Explainability />} />
 
-            {/* fallback */}
-            <Route path="*" element={<Navigate to="/" replace />} />
+            {/* Protected: only saved items */}
+            <Route
+              path="/saved"
+              element={
+                <RequireAuth>
+                  <Saved />
+                </RequireAuth>
+              }
+            />
+
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </div>
 

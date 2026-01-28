@@ -4,7 +4,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
-from app.db.session import SessionLocal  # 👈 use the canonical SessionLocal
+from app.db.session import SessionLocal  # use the canonical SessionLocal
 from app.core.security import decode_access_token
 from app.models.user import User
 

@@ -67,7 +67,7 @@ class PlayerStatsOut(BaseModel):
     turnovers: Optional[float] = None
 
     class Config:
-        from_attributes = True  # ✅ THIS is required for .from_orm()
+        from_attributes = True  # THIS is required for .from_orm()
 
 class PlayerWithStats(BaseModel):
     id: int

@@ -197,7 +197,7 @@ def get_players_with_stats(
         result.append(
             PlayerWithStats(
                 id=p.id,
-                name=p.name,  # ✅ real column
+                name=p.name,  # real column
                 position=p.position,
                 team_full_name=getattr(p, "team_full_name", None),
                 stats=stats_out,
@@ -273,7 +273,7 @@ def get_player_roto(
 
     return PlayerRoto(
         id=player.id,
-        name=player.name,  # ✅ real column
+        name=player.name,  # real column
         categories=categories,
     )
 
@@ -825,7 +825,7 @@ def get_roto_rankings(
 
 @router.get("/roto_risk_rankings", response_model=List[RotoRiskOut])
 def get_roto_risk_rankings(
-    season: str = "2024-25",              # ✅ NEW
+    season: str = "2024-25",              # NEW
     risk_weight: float = 0.25,
     league_size: int | None = None,
     replacement_rank: int | None = None,
@@ -962,7 +962,7 @@ def get_roto_risk_rankings(
                 "vor_score": float(vor_total),
                 "risk_raw": float(risk_raw),
 
-                # ✅ include season so frontend can display/debug
+                # include season so frontend can display/debug
                 "season": season,
             }
         )

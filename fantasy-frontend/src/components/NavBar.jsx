@@ -1,14 +1,21 @@
 // src/components/NavBar.jsx
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 
 const tabs = [
-  { to: "/", label: "Dashboard" },
+  { to: "/dashboard", label: "Dashboard" },
   { to: "/optimizer", label: "Optimizer" },
   { to: "/draft", label: "Draft Planner" },
   { to: "/explain", label: "Explainability" },
 ];
 
 export default function NavBar() {
+  const location = useLocation();
+
+  // Hide navbar on login page
+  if (location.pathname === "/login") {
+    return null;
+  }
+
   return (
     <header style={styles.header}>
       <div style={styles.inner}>
@@ -19,7 +26,7 @@ export default function NavBar() {
             <NavLink
               key={t.to}
               to={t.to}
-              end={t.to === "/"}
+              end
               style={({ isActive }) => ({
                 ...styles.tab,
                 ...(isActive ? styles.tabActive : {}),
@@ -53,7 +60,11 @@ const styles = {
     gridTemplateColumns: "1fr auto 1fr",
     alignItems: "center",
   },
-  brand: { color: "rgba(255,255,255,0.9)", fontWeight: 800, letterSpacing: 0.3 },
+  brand: {
+    color: "rgba(255,255,255,0.9)",
+    fontWeight: 800,
+    letterSpacing: 0.3,
+  },
   nav: {
     justifySelf: "center",
     display: "flex",

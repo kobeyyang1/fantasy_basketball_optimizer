@@ -9,9 +9,12 @@ from app.api.routes_users import router as users_router
 from app.api.routes_auth import router as auth_router
 from app.api.routes_players import router as players_router
 from app.api.routes_fantasy import router as fantasy_router
+from app.api.routes_saved import router as saved_router
 
 from app.db.session import engine
 from app.db.base_class import Base
+from app.db import base  # noqa: F401
+
 
 
 # Create tables
@@ -19,7 +22,7 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Fantasy Basketball API")
 
-# (optional) allow your frontend later
+# allow for frontend later
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -36,6 +39,7 @@ app.include_router(users_router, prefix="/users", tags=["users"])
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(players_router, prefix="/players", tags=["players"])
 app.include_router(fantasy_router, prefix="/fantasy", tags=["fantasy"])
+app.include_router(saved_router, prefix="/fantasy", tags=["saved"])
 
 
 @app.get("/")

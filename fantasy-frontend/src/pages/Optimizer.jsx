@@ -6,6 +6,8 @@ import PuntSelector from "../components/PuntSelector";
 import { useSeason } from "../hooks/useSeason";
 import { useLeagueStats } from "../hooks/useLeagueStats";
 import { getRotoRiskRankings, getActivePlayersStats, getPlayersWithStats } from "../api/fantasyApi";
+import { createSavedItem } from "../api/fantasyApi";
+import { useNavigate } from "react-router-dom";
 
 const DEFAULT_ROUNDS = 9;
 const DEFAULT_SLOTS = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL", "UTIL"];
@@ -43,7 +45,7 @@ function snakePick(leagueSize, draftSlot1Indexed, round1Indexed) {
 function availabilityProb(rank, pick) {
   // rank smaller = earlier pick (harder to still be available later)
   const softness = 6; // tweak: higher = softer curve
-  const x = (rank - pick) / softness; // ✅ flipped
+  const x = (rank - pick) / softness; // flipped
   return 1 / (1 + Math.exp(-x));
 }
 
@@ -137,7 +139,7 @@ function marginalCategoryGain({ teamZByCat, candZByCat, targets, focusCats, punt
   return gain;
 }
 
-// ✅ Use backend z_scores so locks/focus really change output (and matches rankings)
+//  Use backend z_scores so locks/focus really change output (and matches rankings)
 function candidateZVectorFromRankings(playerId, zById) {
   const z = zById.get(playerId) || {};
   const out = {};
@@ -356,6 +358,7 @@ function buildLineup({
 }
 
 export default function Optimizer() {
+  const nav = useNavigate();
   const { season, setSeason, seasons } = useSeason();
   const { league, loading: loadingLeague } = useLeagueStats(); // still used for UI/loading gating
 
@@ -478,6 +481,21 @@ export default function Optimizer() {
         lineup,
       },
     ]);
+  };
+
+  const saveLineup = async (lineupObject) => {
+    try {
+      await createSavedItem({
+        kind: "lineup",
+        title: "Lineup 1",
+        season,
+        payload: lineupObject, // store exactly what you render
+      });
+      alert("Saved!");
+    } catch (e) {
+      if (e?.response?.status === 401) nav("/login");
+      else alert("Save failed.");
+    }
   };
 
   return (
@@ -660,8 +678,11 @@ export default function Optimizer() {
                     ) : null}
                   </div>
                 </div>
-                <div style={{ color: "#aaa" }}>
-                  Slot {draftSlot} • {leagueSize} teams • {season}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ color: "#aaa" }}>
+                    Slot {draftSlot} • {leagueSize} teams • {season}
+                  </div>
+                  <button onClick={() => saveLineup(b)}>Save lineup</button>
                 </div>
               </div>
 

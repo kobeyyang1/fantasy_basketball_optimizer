@@ -85,3 +85,13 @@ export const getExplainabilityList = (params = {}) => {
 };
 
 export default api;
+
+export const createSavedItem = (payload) =>
+  api.post("/fantasy/saved", payload);
+
+export const listSavedItems = () =>
+  api.get("/fantasy/saved");
+
+export const deleteSavedItem = (id) =>
+  api.delete(`/fantasy/saved/${id}`);
+
