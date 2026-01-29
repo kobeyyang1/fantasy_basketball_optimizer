@@ -31,7 +31,8 @@ def import_players_from_nba_api(db: Session, season: str = "2023-24") -> int:
     for _, row in df.iterrows():
         name = str(row["DISPLAY_FIRST_LAST"]).strip()
         external_id = int(row["PERSON_ID"])
-        team_name = row["TEAM_NAME"] if row["TEAM_NAME"] else None
+        # commonallplayers team can be stale. We'll refresh "real" team separately.
+        team_name = row["TEAM_NAME"] if row.get("TEAM_NAME") else None
 
         existing = (
             db.query(Player)

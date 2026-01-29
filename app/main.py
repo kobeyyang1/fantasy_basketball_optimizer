@@ -15,6 +15,7 @@ from app.db.session import engine
 from app.db.base_class import Base
 from app.db import base  # noqa: F401
 
+from app.api.routes_admin import router as admin_router
 
 
 # Create tables
@@ -40,6 +41,7 @@ app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(players_router, prefix="/players", tags=["players"])
 app.include_router(fantasy_router, prefix="/fantasy", tags=["fantasy"])
 app.include_router(saved_router, prefix="/fantasy", tags=["saved"])
+app.include_router(admin_router, prefix="/admin", tags=["admin"])
 
 
 @app.get("/")
