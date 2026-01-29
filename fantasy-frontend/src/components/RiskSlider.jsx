@@ -7,7 +7,7 @@ export default function RiskSlider({
   label = "Availability Weight",
   showLabel = true,
   min = 0,
-  max = 1,
+  max = 2,
   step = 0.05,
   width = 520,
 }) {
