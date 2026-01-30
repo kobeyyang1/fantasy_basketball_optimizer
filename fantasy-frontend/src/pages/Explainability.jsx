@@ -19,6 +19,66 @@ const PER_GAME_STATS = new Set([
 
 const PERCENT_STATS = new Set(["fg_pct", "ft_pct"]);
 
+// Use SHAP magnitudes for this player to set thresholds dynamically
+function makeImpactClassifier(rows) {
+  const mags = (rows || [])
+    .map((r) => Math.abs(Number(r.shap ?? r.SHAP ?? r.shap_value ?? 0)))
+    .filter((x) => Number.isFinite(x))
+    .sort((a, b) => a - b);
+
+  // fallback thresholds if something goes weird
+  if (!mags.length) {
+    return () => ({
+      label: "neutral",
+      dir: "neutral",
+      color: "#9ca3af",
+    });
+  }
+
+  // Use quantiles so labels are meaningful for each player.
+  const q = (p) => mags[Math.floor((mags.length - 1) * p)];
+  const tSlight = q(0.35); // bottom ~35% = slight
+  const tStrong = q(0.75); // top ~25% = strong
+
+  return (shapVal) => {
+    const s = Number(shapVal ?? 0);
+    if (!Number.isFinite(s) || s === 0) {
+      return { label: "neutral", dir: "neutral", color: "#9ca3af" };
+    }
+
+    const mag = Math.abs(s);
+    const helps = s > 0;
+
+    // 4 buckets
+    let label = "";
+    if (mag < tSlight) label = helps ? "slightly helps" : "slightly hurts";
+    else if (mag < tStrong) label = helps ? "helps" : "hurts";
+    else label = helps ? "strongly helps" : "strongly hurts";
+
+    // theme-friendly colors (dark UI)
+    const color =
+      label.includes("helps")
+        ? label.includes("slightly")
+          ? "rgba(34,197,94,0.70)" // green-500 softer
+          : label.includes("strongly")
+            ? "rgba(34,197,94,1.0)" // full green
+            : "rgba(34,197,94,0.88)"
+        : label.includes("hurts")
+          ? label.includes("slightly")
+            ? "rgba(239,68,68,0.70)" // red-500 softer
+            : label.includes("strongly")
+              ? "rgba(239,68,68,1.0)"
+              : "rgba(239,68,68,0.88)"
+          : "rgba(156,163,175,0.8)";
+
+    return {
+      label,
+      dir: helps ? "up" : "down",
+      color,
+    };
+  };
+}
+
 export default function Explainability() {
   const { season, setSeason, seasons } = useSeason();
 
@@ -117,6 +177,11 @@ export default function Explainability() {
 
     return n.toFixed(3);
   };
+
+  const classifyImpact = useMemo(
+    () => makeImpactClassifier(explain?.impacts),
+    [explain?.impacts]
+  );
 
   return (
     <div>
@@ -248,8 +313,8 @@ export default function Explainability() {
               <tbody>
                 {explain.impacts.map((r) => {
                   const shap = Number(r.shap_value);
-                  const good = shap >= 0;
                   const gp = Number(explain.gp || 1);
+                  const impact = classifyImpact(r.shap ?? r.SHAP ?? r.shap_value);
 
                   return (
                     <tr key={r.feature}>
@@ -267,11 +332,16 @@ export default function Explainability() {
 
                       <td
                         style={{
-                          fontWeight: 700,
-                          color: good ? "#0a7a2f" : "#b00020",
+                          fontWeight: 800,
+                          color: impact.color,
                         }}
                       >
-                        {good ? "↑ helps" : "↓ hurts"}
+                        {impact.dir === "up"
+                          ? "↑"
+                          : impact.dir === "down"
+                            ? "↓"
+                            : "•"}{" "}
+                        {impact.label}
                       </td>
                     </tr>
                   );
