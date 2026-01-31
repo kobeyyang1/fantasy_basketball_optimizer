@@ -17,6 +17,35 @@ const num = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+const pick = (obj, keys, fallback = null) => {
+  for (const k of keys) {
+    if (obj && obj[k] !== undefined && obj[k] !== null) return obj[k];
+  }
+  return fallback;
+};
+
+const getStatsObj = (row) => {
+  if (!row) return null;
+  return row.avg || row.totals || row.stats || row;
+};
+
+const getStat = (stats, key) => {
+  const map = {
+    fg_pct: ["fg_pct", "fg%", "fgp", "fgPct", "fgPercentage"],
+    ft_pct: ["ft_pct", "ft%", "ftp", "ftPct", "ftPercentage"],
+    three_pm: ["three_pm", "3pm", "threepm", "threes", "fg3m"],
+    points: ["points", "pts", "PTS"],
+    rebounds: ["rebounds", "reb", "REB"],
+    assists: ["assists", "ast", "AST"],
+    steals: ["steals", "stl", "STL"],
+    blocks: ["blocks", "blk", "BLK"],
+    turnovers: ["turnovers", "tov", "TOV"],
+  };
+  const keys = map[key] || [key];
+  const val = pick(stats, keys, null);
+  return num(val);
+};
+
 const fmtPct = (v) => (num(v) === null ? "-" : Number(v).toFixed(3));
 const fmt2 = (v) => (num(v) === null ? "-" : Number(v).toFixed(2));
 
@@ -106,17 +135,12 @@ export default function DraftPlanner() {
 
   // --- helpers for z-scoring + values ---
   const zOf = (statKey, v) => {
-    const mean = league?.mean?.[statKey];
-    const std = league?.std?.[statKey];
+    const mean = league?.[statKey]?.mean;
+    const std = league?.[statKey]?.std;
     const val = num(v);
     if (val === null || mean === undefined || std === undefined || !std) return null;
     return (val - mean) / std;
   };
-
-  const getAvg = (pid, key) => statsById?.get(pid)?.avg?.[key];
-  const getPct = (pid, key) => statsById?.get(pid)?.avg?.[key]; // fg/ft already avg
-  const getTeam = (pid) => statsById?.get(pid)?.team;
-  const getPos = (pid) => statsById?.get(pid)?.position;
 
   // table styles (forces DARK table, prevents white blocks)
   const tableStyle = {
@@ -150,6 +174,130 @@ export default function DraftPlanner() {
     fontSize: 13,
   };
 
+  const styles = {
+    sidebar: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 16,
+    },
+    sideCard: {
+      background: "rgba(15, 23, 42, 0.95)",
+      border: "none",
+      borderRadius: 14,
+      overflow: "hidden",
+      boxShadow: "0 12px 30px rgba(0,0,0,0.35)",
+    },
+    sideCardHeader: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: "12px 14px",
+      borderBottom: "1px solid rgba(255,255,255,0.08)",
+      background: "rgba(255,255,255,0.04)",
+      gap: 10,
+    },
+    sideCardTitle: {
+      fontSize: 15,
+      fontWeight: 800,
+      color: "#fff",
+    },
+    sideCardSub: {
+      fontSize: 12,
+      color: "rgba(255,255,255,0.65)",
+    },
+    miniBtn: {
+      padding: "6px 10px",
+      borderRadius: 10,
+      border: "1px solid rgba(255,255,255,0.16)",
+      background: "rgba(255,255,255,0.06)",
+      color: "#fff",
+      cursor: "pointer",
+      fontWeight: 700,
+    },
+    miniBtnDanger: {
+      padding: "6px 10px",
+      borderRadius: 10,
+      border: "1px solid rgba(239,68,68,0.45)",
+      background: "rgba(239,68,68,0.14)",
+      color: "#fff",
+      cursor: "pointer",
+      fontWeight: 700,
+    },
+    sideList: {
+      maxHeight: 420,
+      overflow: "auto",
+      padding: 12,
+      display: "flex",
+      flexDirection: "column",
+      gap: 10,
+    },
+    emptyState: {
+      color: "rgba(255,255,255,0.7)",
+      fontSize: 13,
+    },
+    emptyHint: {
+      color: "rgba(255,255,255,0.5)",
+      fontSize: 12,
+      marginTop: 4,
+    },
+    playerRow: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 10,
+      padding: "8px 10px",
+      borderRadius: 10,
+      background: "rgba(255,255,255,0.03)",
+      border: "1px solid rgba(255,255,255,0.06)",
+    },
+    playerName: {
+      fontWeight: 700,
+      color: "#fff",
+      whiteSpace: "nowrap",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+    },
+    playerMeta: {
+      fontSize: 12,
+      color: "rgba(255,255,255,0.6)",
+    },
+    pillBtn: {
+      padding: "6px 10px",
+      borderRadius: 999,
+      border: "1px solid rgba(255,255,255,0.16)",
+      background: "rgba(0,0,0,0.2)",
+      color: "#fff",
+      cursor: "pointer",
+      fontWeight: 700,
+      whiteSpace: "nowrap",
+    },
+  };
+
+  const myTeam = myTeamPlayers;
+
+  const draftedOthers = useMemo(() => {
+    return draftedIds
+      .filter((id) => !myTeamSet.has(id))
+      .map((id) => players.find((p) => p.player_id === id))
+      .filter(Boolean);
+  }, [draftedIds, myTeamSet, players]);
+
+  const onUndoLastPick = () => {
+    setMyTeamIds((prev) => {
+      if (!prev.length) return prev;
+      const removed = prev[prev.length - 1];
+      setDraftedIds((dprev) => dprev.filter((id) => id !== removed));
+      return prev.slice(0, -1);
+    });
+  };
+
+  const undoPick = (playerId) => undoDrafted(playerId);
+  const undraftOther = (playerId) => undoDrafted(playerId);
+
+  const clearDraftedOthers = () => {
+    setDraftedIds((prev) => prev.filter((id) => myTeamSet.has(id)));
+  };
+
   return (
     <div>
       <h2>Draft Planner</h2>
@@ -160,13 +308,12 @@ export default function DraftPlanner() {
 
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 16, alignItems: "end" }}>
         <div>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", marginBottom: 6 }}>Season</div>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", marginBottom: 6 }}></div>
           <SeasonDropdown value={season} onChange={setSeason} seasons={seasons} />
         </div>
 
         <div>
           <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", marginBottom: 6 }}>
-            Risk Weight: <b style={{ color: "#fff" }}>{riskWeight.toFixed(2)}</b>
           </div>
           <RiskSlider value={riskWeight} onChange={setRiskWeight} />
         </div>
@@ -261,23 +408,31 @@ export default function DraftPlanner() {
                 {availablePlayers.slice(0, 120).map((p, idx) => {
                   const pid = p.player_id;
 
-                  const fg = getPct(pid, "fg_pct");
-                  const ft = getPct(pid, "ft_pct");
+                  const row =
+                    statsById?.get(pid) ??
+                    statsById?.get(Number(pid)) ??
+                    statsById?.get(String(pid));
+                  const stats = getStatsObj(row) || {};
+                  const team = pick(row, ["team"], p.team || "-");
+                  const pos = pick(row, ["position"], p.position || "-");
 
-                  const three = getAvg(pid, "three_pm");
-                  const pts = getAvg(pid, "points");
-                  const reb = getAvg(pid, "rebounds");
-                  const ast = getAvg(pid, "assists");
-                  const stl = getAvg(pid, "steals");
-                  const blk = getAvg(pid, "blocks");
-                  const tov = getAvg(pid, "turnovers");
+                  const fg = getStat(stats, "fg_pct");
+                  const ft = getStat(stats, "ft_pct");
+
+                  const three = getStat(stats, "three_pm");
+                  const pts = getStat(stats, "points");
+                  const reb = getStat(stats, "rebounds");
+                  const ast = getStat(stats, "assists");
+                  const stl = getStat(stats, "steals");
+                  const blk = getStat(stats, "blocks");
+                  const tov = getStat(stats, "turnovers");
 
                   return (
                     <tr key={pid}>
                       <td style={tdBase}>{idx + 1}</td>
                       <td style={{ ...tdBase, fontWeight: 700 }}>{p.player_name}</td>
-                      <td style={tdBase}>{getPos(pid) || p.position || "-"}</td>
-                      <td style={tdBase}>{getTeam(pid) || p.team || "-"}</td>
+                      <td style={tdBase}>{pos}</td>
+                      <td style={tdBase}>{team}</td>
 
                       <StatCell value={fmtPct(fg)} z={zOf("fg_pct", fg)} />
                       <StatCell value={fmtPct(ft)} z={zOf("ft_pct", ft)} />
@@ -309,7 +464,7 @@ export default function DraftPlanner() {
                           }}
                         >
                           Draft (My Team)
-                        </button>
+                        </button>a
                         <button
                           onClick={() => markDrafted(pid)}
                           style={{
@@ -336,43 +491,115 @@ export default function DraftPlanner() {
             </div>
           </div>
 
-          {/* My Team */}
-          <div>
-            <h3>My Team ({myTeamPlayers.length})</h3>
-
-            {myTeamPlayers.length === 0 ? (
-              <p style={{ color: "rgba(255,255,255,0.75)" }}>
-                No picks yet. Use “Draft (My Team)” on the left.
-              </p>
-            ) : (
-              <ul>
-                {myTeamPlayers.map((p) => (
-                  <li key={p.player_id} style={{ marginBottom: 6 }}>
-                    <button onClick={() => undoDrafted(p.player_id)}>Undo</button>{" "}
-                    <b>{p.player_name}</b> — {p.position || "-"} {p.team ? `(${p.team})` : ""}
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            <h3 style={{ marginTop: 20 }}>Drafted (Others) ({draftedIds.length - myTeamIds.length})</h3>
-            <p style={{ color: "rgba(255,255,255,0.65)" }}>
-              Players you marked “Drafted” but not in your team.
-            </p>
-
-            <div style={{ maxHeight: 260, overflow: "auto", border: "1px solid rgba(255,255,255,0.12)", padding: 10, borderRadius: 12 }}>
-              {draftedIds
-                .filter((id) => !myTeamSet.has(id))
-                .map((id) => players.find((p) => p.player_id === id))
-                .filter(Boolean)
-                .map((p) => (
-                  <div key={p.player_id} style={{ marginBottom: 8 }}>
-                    <button onClick={() => undoDrafted(p.player_id)}>Undo</button>{" "}
-                    <b>{p.player_name}</b> — {p.position || "-"} {p.team ? `(${p.team})` : ""}
+          {/* Right Sidebar */}
+          <aside style={styles.sidebar}>
+            {/* My Team */}
+            <div style={styles.sideCard}>
+              <div style={styles.sideCardHeader}>
+                <div>
+                  <div style={styles.sideCardTitle}>My Team</div>
+                  <div style={styles.sideCardSub}>
+                    {myTeam.length} player{myTeam.length === 1 ? "" : "s"}
                   </div>
-                ))}
+                </div>
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    style={styles.miniBtn}
+                    onClick={() => onUndoLastPick?.()}
+                    disabled={!myTeam.length}
+                    title="Undo last pick"
+                  >
+                    Undo
+                  </button>
+
+                  <button style={styles.miniBtnDanger} onClick={clearDraft}>
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+              <div style={styles.sideList}>
+                {myTeam.length === 0 ? (
+                  <div style={styles.emptyState}>
+                    No picks yet.
+                    <div style={styles.emptyHint}>
+                      Use “Draft (My Team)” in the table.
+                    </div>
+                  </div>
+                ) : (
+                  myTeam.map((p) => (
+                    <div key={p.player_id} style={styles.playerRow}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={styles.playerName} title={p.player_name}>
+                          {p.player_name}
+                        </div>
+                        <div style={styles.playerMeta}>
+                          {p.position || "-"} • {p.team || "-"}
+                        </div>
+                      </div>
+
+                      <button
+                        style={styles.pillBtn}
+                        onClick={() => undoPick?.(p.player_id)}
+                        title="Remove from My Team"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
-          </div>
+
+            {/* Drafted (Others) */}
+            <div style={styles.sideCard}>
+              <div style={styles.sideCardHeader}>
+                <div>
+                  <div style={styles.sideCardTitle}>Drafted (Others)</div>
+                  <div style={styles.sideCardSub}>
+                    {draftedOthers.length} marked
+                  </div>
+                </div>
+
+                <button style={styles.miniBtn} onClick={clearDraftedOthers}>
+                  Clear
+                </button>
+              </div>
+
+              <div style={styles.sideList}>
+                {draftedOthers.length === 0 ? (
+                  <div style={styles.emptyState}>
+                    None yet.
+                    <div style={styles.emptyHint}>
+                      Use “Drafted” to track other managers.
+                    </div>
+                  </div>
+                ) : (
+                  draftedOthers.map((p) => (
+                    <div key={p.player_id} style={styles.playerRow}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={styles.playerName} title={p.player_name}>
+                          {p.player_name}
+                        </div>
+                        <div style={styles.playerMeta}>
+                          {p.position || "-"} • {p.team || "-"}
+                        </div>
+                      </div>
+
+                      <button
+                        style={styles.pillBtn}
+                        onClick={() => undraftOther?.(p.player_id)}
+                        title="Unmark drafted"
+                      >
+                        Undo
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </aside>
         </div>
       )}
     </div>
