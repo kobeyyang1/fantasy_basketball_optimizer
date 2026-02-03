@@ -14,6 +14,7 @@ print("DEBUG DEPS SECRET_KEY:", security.SECRET_KEY)
 bearer_scheme = HTTPBearer()
 
 
+# Interview: Provide a DB session per request and close it afterward.
 def get_db():
     db = SessionLocal()
     try:
@@ -22,6 +23,7 @@ def get_db():
         db.close()
 
 
+# Interview: Read Bearer token, decode JWT, then load the user from DB.
 def get_current_user(
     creds: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: Session = Depends(get_db),
@@ -52,6 +54,7 @@ def get_current_user(
 
     return user
 
+# Interview: Dev shortcut that always returns the first user in the DB.
 def get_current_user_dev(
     db: Session = Depends(get_db),
 ) -> User:

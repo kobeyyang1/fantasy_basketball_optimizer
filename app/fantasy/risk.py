@@ -13,6 +13,7 @@ SEASON_POSSIBLE_GAMES = {
 LAST_5 = ["2020-21", "2021-22", "2022-23", "2023-24", "2024-25"]
 
 
+# Interview: Compute availability % across the last 5 seasons (missing seasons don't hurt rookies).
 def risk_raw_from_rows(season_rows: Iterable, seasons: list[str] = LAST_5) -> float:
     """
     Returns availability percentage (0.0 -> 1.0).

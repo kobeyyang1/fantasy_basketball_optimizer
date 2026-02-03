@@ -40,6 +40,7 @@ from sqlalchemy.orm import Session
 from app.models.player import Player
 from app.models.player_season_stats import PlayerSeasonStats
 
+# Interview: Pull active players for a season and return totals + per-game averages.
 @router.get("/active_players_stats")
 def active_players_stats(
     season: str = Query(..., description="Season like 2024-25"),
@@ -91,7 +92,7 @@ def active_players_stats(
                     "ft_pct": float(s.ft_pct or 0),
                 },
 
-                # per-game averages (what you want to show on frontend)
+                # per-game averages (whats shown on frontend)
                 "avg": {
                     "points": per_game(s.points),
                     "rebounds": per_game(s.rebounds),
@@ -110,12 +111,14 @@ def active_players_stats(
 
     return out
 
+# Interview: Quick health check that shows which DB URL the API is using.
 @router.get("/debug_db")
 def debug_db():
     return {"db_url": SQLALCHEMY_DATABASE_URL}
 
 
 
+# Interview: Build projected fantasy points for every player.
 @router.get("/projections", response_model=List[PlayerProjection])
 def get_projections(
     db: Session = Depends(get_db),
@@ -140,6 +143,7 @@ def get_projections(
     return result
 
 
+# Interview: Return top N players by projected points.
 @router.get("/top_players", response_model=List[PlayerProjection])
 def get_top_players(
     limit: int = 10,
@@ -175,6 +179,7 @@ def get_top_players(
     return projections[:limit]
 
 
+# Interview: Return all players plus their stored stats (if any).
 @router.get("/players_with_stats", response_model=List[PlayerWithStats])
 def get_players_with_stats(
     db: Session = Depends(get_db),
@@ -206,6 +211,7 @@ def get_players_with_stats(
 
     return result
 
+# Interview: Return active players with 9-cat stats for the picker UI.
 @router.get("/players_active_with_stats")
 def get_players_active_with_stats(
     db: Session = Depends(get_db),
@@ -245,6 +251,7 @@ def get_players_active_with_stats(
     return result
 
 
+# Interview: Return one player's 9-cat stat line.
 @router.get("/player_roto/{player_id}", response_model=PlayerRoto)
 def get_player_roto(
     player_id: int,
@@ -278,6 +285,7 @@ def get_player_roto(
     )
 
 
+# Interview: Return roto-category averages for all players with stats.
 @router.get("/roto_overview", response_model=List[PlayerRoto])
 def get_roto_overview(
     db: Session = Depends(get_db),
@@ -325,6 +333,7 @@ def get_roto_overview(
 
 # ---------- Roto z-score models & endpoints ----------
 
+# Interview: API shape for per-player roto z-scores and totals.
 class RotoZScoresOut(BaseModel):
     player_id: int
     player_name: str
@@ -332,6 +341,7 @@ class RotoZScoresOut(BaseModel):
     total_score: float
     vor_score: float | None = None  # value over replacement
 
+# Interview: API shape for roto scores plus durability risk metrics.
 class RotoRiskOut(BaseModel):
     player_id: int
     player_name: str
@@ -342,6 +352,7 @@ class RotoRiskOut(BaseModel):
     risk_z: float
     combined_score: float
 
+# Interview: API shape for ML-based ranking rows.
 class PlayerMLRanking(BaseModel):
     player_id: int
     name: str
@@ -350,6 +361,7 @@ class PlayerMLRanking(BaseModel):
     season: str
     ml_score: float
 
+# Interview: One feature's SHAP impact details for explainability.
 class ShapFeatureImpact(BaseModel):
     feature: str
     value: float
@@ -357,6 +369,7 @@ class ShapFeatureImpact(BaseModel):
     abs_shap_value: float
 
 
+# Interview: API shape for ML explainability output per player.
 class PlayerMLExplainOut(BaseModel):
     player_id: int
     name: str
@@ -368,6 +381,7 @@ class PlayerMLExplainOut(BaseModel):
     base_value: float
     impacts: List[ShapFeatureImpact]
 
+# Interview: Totals for a team across 9 categories.
 class TeamTotalsOut(BaseModel):
     fg_pct: float | None = None
     ft_pct: float | None = None
@@ -380,6 +394,7 @@ class TeamTotalsOut(BaseModel):
     turnovers: float = 0.0
 
 
+# Interview: Minimal player info used in team responses.
 class TeamPlayerOut(BaseModel):
     player_id: int
     name: str
@@ -387,10 +402,12 @@ class TeamPlayerOut(BaseModel):
     position: str | None = None
 
 
+# Interview: Team roster plus raw totals.
 class TeamRotoOut(BaseModel):
     players: List[TeamPlayerOut]
     totals: TeamTotalsOut
 
+# Interview: Team roto scoring details (used/punted categories and z-scores).
 class TeamRotoScoresOut(BaseModel):
     used_categories: List[str]
     punted_categories: List[str]
@@ -399,11 +416,13 @@ class TeamRotoScoresOut(BaseModel):
     total_score: float
 
 
+# Interview: Full team output with totals + roto score.
 class TeamRotoScoredOut(BaseModel):
     players: List[TeamPlayerOut]
     totals: TeamTotalsOut
     roto: TeamRotoScoresOut
 
+# Interview: Combine players into team totals and weighted FG/FT%.
 @router.get("/team_roto", response_model=TeamRotoOut)
 def get_team_roto(
     player_ids: str,              # comma-separated list like "1,2,3"
@@ -494,6 +513,7 @@ def get_team_roto(
         ),
     )
 
+# Interview: Score a team vs league z-scores, with optional punts.
 @router.get("/team_roto_scored", response_model=TeamRotoScoredOut)
 def get_team_roto_scored(
     player_ids: str,
@@ -697,6 +717,7 @@ def get_team_roto_scored(
         ),
     )
 
+# Interview: Rank players by roto z-scores and value over replacement.
 @router.get("/roto_rankings", response_model=List[RotoZScoresOut])
 def get_roto_rankings(
     league_size: int | None = None,        # league size preset
@@ -823,6 +844,7 @@ def get_roto_rankings(
 
     return response
 
+# Interview: Roto rankings for a season, blended with durability risk.
 @router.get("/roto_risk_rankings", response_model=List[RotoRiskOut])
 def get_roto_risk_rankings(
     season: str = "2024-25",              # NEW
@@ -979,16 +1001,19 @@ def get_roto_risk_rankings(
 
 # ---------- Roto summary (league means/stds) ----------
 
+# Interview: Small container for mean/std/count for one category.
 class RotoSummaryCategory(BaseModel):
     mean: float
     std: float
     count: int
 
 
+# Interview: API shape for the league-wide roto summary.
 class RotoSummaryOut(BaseModel):
     categories: Dict[str, RotoSummaryCategory]
 
 
+# Interview: Compute league averages and std devs for chosen categories.
 @router.get("/roto_summary", response_model=RotoSummaryOut)
 def get_roto_summary(
     punt: str | None = None,
@@ -1063,6 +1088,7 @@ def get_roto_summary(
 
     return RotoSummaryOut(categories=summary)
 
+# Interview: API shape for a player's detailed profile.
 class PlayerProfileOut(BaseModel):
     id: int
     name: str
@@ -1070,6 +1096,7 @@ class PlayerProfileOut(BaseModel):
     position: str | None = None
     stats: PlayerStatsOut | None = None
 
+# Interview: One suggested add and its roto delta.
 class TeamSuggestionOut(BaseModel):
     player_id: int
     name: str
@@ -1079,11 +1106,13 @@ class TeamSuggestionOut(BaseModel):
     delta: float
 
 
+# Interview: Response shape for team suggestion endpoint.
 class TeamSuggestionsResponse(BaseModel):
     base_team_score: float
     suggestions: List[TeamSuggestionOut]
 
 
+# Interview: Return a player's profile and full stats.
 @router.get("/player_profile/{player_id}", response_model=PlayerProfileOut)
 def get_player_profile(
     player_id: int,
@@ -1118,6 +1147,7 @@ def get_player_profile(
         stats=stats_out,
     )
 
+# Interview: Debug endpoint to list players (optionally filtered).
 @router.get("/debug_players", response_model=List[PlayerWithStats])
 def debug_players(
     q: str | None = None,
@@ -1164,6 +1194,7 @@ def debug_players(
     print(f"[DEBUG] debug_players: returning {len(result)} players (after filter q={q!r})")
     return result
 
+# Interview: Return ML model rankings for a season.
 @router.get("/ml_rankings", response_model=List[PlayerMLRanking])
 def get_ml_rankings(
     limit: int = 50,
@@ -1174,6 +1205,7 @@ def get_ml_rankings(
     results = predict_roto_scores_with_rf(db, season=season)
     return results[:limit]
 
+# Interview: Return SHAP explainability for one player.
 @router.get("/ml_explain/{player_id}", response_model=PlayerMLExplainOut)
 def get_ml_explain(
     player_id: int,
@@ -1190,6 +1222,7 @@ def get_ml_explain(
         )
     return data
 
+# Interview: Helper that scores a team roster only.
 def compute_team_score_for_ids(
     db: Session,
     player_ids: list[int],
@@ -1275,6 +1308,7 @@ def compute_team_score_for_ids(
 
     return float(total_score)
 
+# Interview: Suggest adds that improve team roto score most.
 @router.get("/team_suggestions", response_model=TeamSuggestionsResponse)
 def get_team_suggestions(
     player_ids: str,

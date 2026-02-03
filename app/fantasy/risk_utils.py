@@ -4,6 +4,7 @@ import math
 from typing import List, Dict
 
 
+# Interview: Convert a list of numbers into z-scores (mean 0, std 1).
 def z_score(values: List[float]) -> List[float]:
     if not values:
         return []
@@ -18,6 +19,7 @@ def z_score(values: List[float]) -> List[float]:
     return [(v - mean) / std for v in values]
 
 
+# Interview: Attach risk z-scores to each player dict in-place.
 def attach_risk_z(players: List[Dict]) -> None:
     risk_vals = [p["risk_raw"] for p in players]
     z_vals = z_score(risk_vals)

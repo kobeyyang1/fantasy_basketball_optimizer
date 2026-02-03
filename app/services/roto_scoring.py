@@ -4,10 +4,12 @@ from typing import List, Dict, Any, Optional
 from math import sqrt
 
 
+# Interview: Simple data holder for a player's z-scores and total roto score.
 class RotoCategoryResult:
     """
     Holds z-scores for one player in all categories, plus a total roto score.
     """
+    # Interview: Save the player id/name and computed scores on the object.
     def __init__(
         self,
         player_id: int,
@@ -20,6 +22,7 @@ class RotoCategoryResult:
         self.z_scores = z_scores
         self.total_score = total_score
 
+    # Interview: Convert the object into a plain dict for JSON/Pydantic responses.
     def to_dict(self) -> Dict[str, Any]:
         """
         Convert to a plain dict (useful for JSON responses or Pydantic models).
@@ -32,17 +35,19 @@ class RotoCategoryResult:
         }
 
 
+# Interview: Average a list of numbers (returns 0 for empty input).
 def _compute_mean(values: List[float]) -> float:
     if not values:
         return 0.0
     return sum(values) / len(values)
 
 
+# Interview: Compute population standard deviation for a list.
 def _compute_std(values: List[float], mean: float) -> float:
     """
     Population standard deviation.
-    If all values are the same, std will be 0 – we handle that later by
-    returning a z-score of 0 in that case.
+    If all values are the same, std will be 0. 
+    handle that later by returning a z-score of 0 in that case.
     """
     if not values:
         return 0.0
@@ -51,6 +56,7 @@ def _compute_std(values: List[float], mean: float) -> float:
     return sqrt(variance)
 
 
+# Interview: Main roto calculator: z-scores by category + total score per player.
 def compute_roto_scores(
     players: List[Dict[str, Any]],
     categories: Optional[List[str]] = None,
