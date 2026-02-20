@@ -4,6 +4,7 @@ import NavBar from "./components/NavBar";
 import RequireAuth from "./components/RequireAuth";
 
 import Login from "./pages/Login";
+import Landing from "./pages/Landing";
 import Dashboard from "./pages/Dashboard";
 import Optimizer from "./pages/Optimizer";
 import DraftPlanner from "./pages/DraftPlanner";
@@ -20,7 +21,7 @@ export default function App() {
           <Routes>
             {/* Public */}
             <Route path="/login" element={<Login />} />
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/" element={<Landing />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/optimizer" element={<Optimizer />} />
             <Route path="/draft" element={<DraftPlanner />} />
@@ -37,13 +38,13 @@ export default function App() {
               }
             />
 
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>
 
         <footer style={styles.footer}>
           <span style={{ opacity: 0.7 }}>
-            Built for season-aware roto analysis • Local-only draft state
+            Built for season-aware roto analysis - local-only draft state
           </span>
         </footer>
       </main>

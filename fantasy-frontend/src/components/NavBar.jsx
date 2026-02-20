@@ -2,6 +2,7 @@
 import { NavLink, useLocation } from "react-router-dom";
 
 const tabs = [
+  { to: "/", label: "Home" },
   { to: "/dashboard", label: "Dashboard" },
   { to: "/optimizer", label: "Optimizer" },
   { to: "/draft", label: "Draft Planner" },
@@ -26,7 +27,7 @@ export default function NavBar() {
             <NavLink
               key={t.to}
               to={t.to}
-              end
+              end={t.to === "/"}
               style={({ isActive }) => ({
                 ...styles.tab,
                 ...(isActive ? styles.tabActive : {}),
@@ -37,7 +38,7 @@ export default function NavBar() {
           ))}
         </nav>
 
-        <div /> {/* right spacer to keep nav centered */}
+        <div />
       </div>
     </header>
   );
@@ -73,6 +74,7 @@ const styles = {
     borderRadius: 999,
     background: "rgba(255,255,255,0.06)",
     border: "1px solid rgba(255,255,255,0.10)",
+    flexWrap: "wrap",
   },
   tab: {
     padding: "10px 14px",

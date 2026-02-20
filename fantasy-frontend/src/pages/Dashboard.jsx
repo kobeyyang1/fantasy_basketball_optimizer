@@ -349,9 +349,24 @@ export default function Dashboard() {
                 <th style={thStyle}>BLK</th>
                 <th style={thStyle}>TOV</th>
 
-                <th style={thStyle}>Roto</th>
-                <th style={thStyle}>Availability %</th>
-                <th style={thStyle}>Combined</th>
+                <th
+                  style={thStyle}
+                  title="Roto score from the 9-category z-score profile. Higher is better."
+                >
+                  Roto
+                </th>
+                <th
+                  style={thStyle}
+                  title="Estimated availability (durability) percentage. Higher means more expected games played."
+                >
+                  Availability %
+                </th>
+                <th
+                  style={thStyle}
+                  title="Final ranking score that blends Roto value and Availability based on the risk slider."
+                >
+                  Combined
+                </th>
               </tr>
             </thead>
 
