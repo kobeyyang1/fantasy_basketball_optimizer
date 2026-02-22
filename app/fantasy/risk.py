@@ -8,9 +8,10 @@ SEASON_POSSIBLE_GAMES = {
     "2022-23": 82,
     "2023-24": 82,
     "2024-25": 82,
+    "2025-26": 82,
 }
 
-LAST_5 = ["2020-21", "2021-22", "2022-23", "2023-24", "2024-25"]
+LAST_5 = ["2021-22", "2022-23", "2023-24", "2024-25", "2025-26"]
 
 
 # Interview: Compute availability % across the last 5 seasons (missing seasons don't hurt rookies).

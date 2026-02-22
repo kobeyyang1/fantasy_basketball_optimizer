@@ -14,16 +14,17 @@ from app.db.session import SessionLocal  # <-- CHANGE IF YOUR PROJECT USES A DIF
 
 def main():
     db = SessionLocal()
+    season = "2025-26"
 
     try:
         # 1) Import all players from NBA API
         print("=== Importing players from NBA API ===")
-        created = import_players_from_nba_api(db, season="2023-24")
+        created = import_players_from_nba_api(db, season=season)
         print(f"Players newly created: {created}")
 
         # 2) Import stats for those players
         print("=== Importing player stats via nba_api ===")
-        updated = import_nba_stats(db, season="2023-24")
+        updated = import_nba_stats(db, season=season)
         print(f"Players with stats updated: {updated}")
 
         # 3) Fill missing positions (slow but only runs on players with position == None)
@@ -31,9 +32,9 @@ def main():
         pos_updated = import_nba_positions(db, delay_seconds=0.6)
         print(f"Players with position updated: {pos_updated}")
 
-        # 4) Import the last 5 seasons into player_season_stats
-        print("=== Importing LAST 5 SEASONS into player_season_stats ===")
-        seasons = ["2024-25"]
+        # 4) Import current season into player_season_stats
+        print("=== Importing CURRENT SEASON into player_season_stats ===")
+        seasons = ["2025-26"]
 
         for season in seasons:
             print(f"\n--- Importing season totals: {season} ---")

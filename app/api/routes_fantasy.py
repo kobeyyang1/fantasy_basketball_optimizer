@@ -43,7 +43,7 @@ from app.models.player_season_stats import PlayerSeasonStats
 # Interview: Pull active players for a season and return totals + per-game averages.
 @router.get("/active_players_stats")
 def active_players_stats(
-    season: str = Query(..., description="Season like 2024-25"),
+    season: str = Query(..., description="Season like 2025-26"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_dev),
 ):
@@ -847,7 +847,7 @@ def get_roto_rankings(
 # Interview: Roto rankings for a season, blended with durability risk.
 @router.get("/roto_risk_rankings", response_model=List[RotoRiskOut])
 def get_roto_risk_rankings(
-    season: str = "2024-25",              # NEW
+    season: str = "2025-26",              # NEW
     risk_weight: float = 0.25,
     league_size: int | None = None,
     replacement_rank: int | None = None,
@@ -1198,7 +1198,7 @@ def debug_players(
 @router.get("/ml_rankings", response_model=List[PlayerMLRanking])
 def get_ml_rankings(
     limit: int = 50,
-    season: str = "2024-25",
+    season: str = "2025-26",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_dev),
 ):
@@ -1209,7 +1209,7 @@ def get_ml_rankings(
 @router.get("/ml_explain/{player_id}", response_model=PlayerMLExplainOut)
 def get_ml_explain(
     player_id: int,
-    season: str = "2024-25",
+    season: str = "2025-26",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_dev),
 ):

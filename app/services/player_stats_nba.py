@@ -5,19 +5,27 @@ from nba_api.stats.endpoints import leaguedashplayerstats
 
 from app.models.player import Player
 from app.models.player_stats import PlayerStats
+from app.services.nba_retry import run_with_nba_retries
 
 
-def fetch_all_player_stats(season: str = "2023-24"):
+def fetch_all_player_stats(season: str = "2025-26"):
     """
     Fetch season stats for all players using nba_api.
     Returns a pandas DataFrame.
     """
-    stats = leaguedashplayerstats.LeagueDashPlayerStats(
-        season=season,
-        season_type_all_star="Regular Season",
-        per_mode_detailed="Totals",  # or "PerGame" if you prefer
+    def _request():
+        stats = leaguedashplayerstats.LeagueDashPlayerStats(
+            season=season,
+            season_type_all_star="Regular Season",
+            per_mode_detailed="Totals",  # or "PerGame" if you prefer
+            timeout=120,
+        )
+        return stats.get_data_frames()[0]
+
+    df = run_with_nba_retries(
+        _request,
+        label=f"LeagueDashPlayerStats season={season}",
     )
-    df = stats.get_data_frames()[0]
 
     # Optional: debug once
     # print("[DEBUG] leaguedashplayerstats columns:", df.columns.tolist())
@@ -27,7 +35,7 @@ def fetch_all_player_stats(season: str = "2023-24"):
     return df
 
 
-def import_nba_stats(db: Session, season: str = "2023-24") -> int:
+def import_nba_stats(db: Session, season: str = "2025-26") -> int:
     """
     Imports NBA player stats from nba_api and stores them in the PlayerStats table.
     - Matches players by name.

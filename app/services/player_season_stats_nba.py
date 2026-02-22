@@ -5,6 +5,7 @@ from nba_api.stats.endpoints import leaguedashplayerstats
 
 from app.models.player import Player
 from app.models.player_season_stats import PlayerSeasonStats
+from app.services.nba_retry import run_with_nba_retries
 
 
 def import_nba_season_stats(db: Session, season: str) -> dict:
@@ -18,13 +19,18 @@ def import_nba_season_stats(db: Session, season: str) -> dict:
     ext_to_internal = {int(p.external_id): p.id for p in players if p.external_id is not None}
 
     # 1 request per season
-    endpoint = leaguedashplayerstats.LeagueDashPlayerStats(
-        season=season,
-        per_mode_detailed="Totals",
-        timeout=120,
-    )
+    def _request():
+        endpoint = leaguedashplayerstats.LeagueDashPlayerStats(
+            season=season,
+            per_mode_detailed="Totals",
+            timeout=120,
+        )
+        return endpoint.get_data_frames()[0]
 
-    df = endpoint.get_data_frames()[0]
+    df = run_with_nba_retries(
+        _request,
+        label=f"LeagueDashPlayerStats (season totals) season={season}",
+    )
 
     inserted = 0
     updated = 0

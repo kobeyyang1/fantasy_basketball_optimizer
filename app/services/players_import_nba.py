@@ -4,14 +4,22 @@ from sqlalchemy.orm import Session
 from nba_api.stats.endpoints import commonallplayers
 
 from app.models.player import Player
+from app.services.nba_retry import run_with_nba_retries
 
 
-def fetch_all_players(season: str = "2023-24"):
-    endpoint = commonallplayers.CommonAllPlayers(
-        season=season,
-        is_only_current_season=0   # <-- include full player pool
+def fetch_all_players(season: str = "2025-26"):
+    def _request():
+        endpoint = commonallplayers.CommonAllPlayers(
+            season=season,
+            is_only_current_season=0,   # include full player pool
+            timeout=120,
+        )
+        return endpoint.get_data_frames()[0]
+
+    df = run_with_nba_retries(
+        _request,
+        label=f"CommonAllPlayers season={season}",
     )
-    df = endpoint.get_data_frames()[0]
 
     # Keep only players actually on an NBA roster
     df = df[df["ROSTERSTATUS"] == 1]
@@ -19,7 +27,7 @@ def fetch_all_players(season: str = "2023-24"):
     return df
 
 
-def import_players_from_nba_api(db: Session, season: str = "2023-24") -> int:
+def import_players_from_nba_api(db: Session, season: str = "2025-26") -> int:
     df = fetch_all_players(season)
 
     print(f"[DEBUG] NBA API returned {len(df)} ACTIVE players for season {season}")

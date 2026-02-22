@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from nba_api.stats.endpoints import leaguedashplayerstats
 
 from app.models.player import Player
+from app.services.nba_retry import run_with_nba_retries
 
 
 def refresh_teams_from_season_stats(db: Session, season: str, timeout: int = 120) -> dict:
@@ -14,12 +15,18 @@ def refresh_teams_from_season_stats(db: Session, season: str, timeout: int = 120
     This sets Player.team based on that season's team.
     """
 
-    endpoint = leaguedashplayerstats.LeagueDashPlayerStats(
-        season=season,
-        per_mode_detailed="Totals",
-        timeout=timeout,
+    def _request():
+        endpoint = leaguedashplayerstats.LeagueDashPlayerStats(
+            season=season,
+            per_mode_detailed="Totals",
+            timeout=timeout,
+        )
+        return endpoint.get_data_frames()[0]
+
+    df = run_with_nba_retries(
+        _request,
+        label=f"LeagueDashPlayerStats (team refresh) season={season}",
     )
-    df = endpoint.get_data_frames()[0]
 
     # Map external_id -> team_abbrev (or team name if you want)
     # df has PLAYER_ID and TEAM_ABBREVIATION

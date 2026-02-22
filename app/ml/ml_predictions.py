@@ -24,8 +24,8 @@ FEATURE_COLS = [
     "turnovers",
 ]
 
-SUPPORTED_SEASONS = ["2019-20", "2020-21", "2021-22", "2022-23", "2023-24", "2024-25"]
-DEFAULT_SEASON = "2024-25"
+SUPPORTED_SEASONS = ["2019-20", "2020-21", "2021-22", "2022-23", "2023-24", "2024-25", "2025-26"]
+DEFAULT_SEASON = "2025-26"
 
 _rf_model = None  # cached RandomForest model instance
 

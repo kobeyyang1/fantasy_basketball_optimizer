@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 const STORAGE_KEY = "selectedSeason_v1";
 export const SUPPORTED_SEASONS = [
+  "2025-26",
   "2024-25",
   "2023-24",
   "2022-23",
@@ -10,7 +11,7 @@ export const SUPPORTED_SEASONS = [
   "2020-21",
   "2019-20",
 ];
-export const DEFAULT_SEASON = "2024-25";
+export const DEFAULT_SEASON = "2025-26";
 
 export function useSeason() {
   const [season, setSeason] = useState(() => {

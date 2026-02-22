@@ -14,7 +14,7 @@ from app.models.player_season_stats import PlayerSeasonStats
 from nba_api.stats.endpoints import playerdashboardbygeneralsplits
 
 
-SEASONS = ["2019-20", "2020-21", "2021-22", "2022-23", "2023-24"]
+SEASONS = ["2021-22", "2022-23", "2023-24", "2024-25", "2025-26"]
 
 
 def upsert_player_season_stats(db: Session, player_id: int, season: str, data: dict) -> None:

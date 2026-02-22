@@ -5,7 +5,7 @@ const api = axios.create({
   baseURL: "http://localhost:8000",
 });
 
-const DEFAULT_SEASON = "2024-25";
+const DEFAULT_SEASON = "2025-26";
 const SEASON_STORAGE_KEY = "selectedSeason_v1";
 
 function getSeasonFallback() {

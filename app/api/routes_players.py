@@ -52,7 +52,7 @@ def import_players(
 
 @router.post("/import_stats")
 def import_player_stats(
-    season: str = "2023-24",
+    season: str = "2025-26",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
