@@ -10,6 +10,7 @@ import Optimizer from "./pages/Optimizer";
 import DraftPlanner from "./pages/DraftPlanner";
 import Explainability from "./pages/Explainability";
 import Saved from "./pages/Saved";
+import Help from "./pages/Help";
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
             <Route path="/draft" element={<DraftPlanner />} />
             <Route path="/explain" element={<Explainability />} />
             <Route path="/explainability" element={<Explainability />} />
+            <Route path="/help" element={<Help />} />
 
             {/* Protected: only saved items */}
             <Route

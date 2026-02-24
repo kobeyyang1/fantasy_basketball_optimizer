@@ -38,7 +38,19 @@ export default function NavBar() {
           ))}
         </nav>
 
-        <div />
+        <div style={styles.rightSlot}>
+          <NavLink
+            to="/help"
+            style={({ isActive }) => ({
+              ...styles.helpBtn,
+              ...(isActive ? styles.helpBtnActive : {}),
+            })}
+            aria-label="Help"
+            title="Help"
+          >
+            ?
+          </NavLink>
+        </div>
       </div>
     </header>
   );
@@ -66,6 +78,9 @@ const styles = {
     fontWeight: 800,
     letterSpacing: 0.3,
   },
+  rightSlot: {
+    justifySelf: "end",
+  },
   nav: {
     justifySelf: "center",
     display: "flex",
@@ -89,5 +104,25 @@ const styles = {
     color: "rgba(0,0,0,0.9)",
     background: "rgba(255,255,255,0.92)",
     boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
+  },
+  helpBtn: {
+    width: 36,
+    height: 36,
+    display: "grid",
+    placeItems: "center",
+    borderRadius: 999,
+    textDecoration: "none",
+    color: "rgba(255,255,255,0.9)",
+    background: "rgba(255,255,255,0.06)",
+    border: "1px solid rgba(255,255,255,0.14)",
+    fontWeight: 900,
+    fontSize: 18,
+    lineHeight: 1,
+  },
+  helpBtnActive: {
+    background: "rgba(127,223,255,0.18)",
+    border: "1px solid rgba(127,223,255,0.35)",
+    color: "#bdefff",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
   },
 };
