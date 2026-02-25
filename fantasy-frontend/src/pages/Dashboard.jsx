@@ -259,12 +259,15 @@ export default function Dashboard() {
 
   return (
     <div>
-      <h2>Dashboard</h2>
-      <p style={{ color: "rgba(255,255,255,0.75)" }}>
-        Players by roto + availability. Showing {season} averages.
-      </p>
+      <div data-tour="dashboard-header">
+        <h2>Dashboard</h2>
+        <p style={{ color: "rgba(255,255,255,0.75)" }}>
+          Players by roto + availability. Showing {season} averages.
+        </p>
+      </div>
 
       <div
+        data-tour="dashboard-controls"
         style={{
           display: "flex",
           gap: 14,
@@ -273,7 +276,7 @@ export default function Dashboard() {
           marginBottom: 14,
         }}
       >
-        <div>
+        <div data-tour="dashboard-search">
           <div
             style={{
               fontSize: 12,
@@ -331,7 +334,7 @@ export default function Dashboard() {
         <Loading text="Loading dashboard..." />
       ) : (
         <>
-          <table style={tableStyle}>
+          <table style={tableStyle} data-tour="dashboard-table">
             <thead>
               <tr>
                 <th style={thStyle}>#</th>

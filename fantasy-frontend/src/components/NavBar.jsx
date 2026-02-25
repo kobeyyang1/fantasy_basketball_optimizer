@@ -1,5 +1,6 @@
 // src/components/NavBar.jsx
 import { NavLink, useLocation } from "react-router-dom";
+import { useTour } from "../tour/useTour";
 
 const tabs = [
   { to: "/", label: "Home" },
@@ -11,6 +12,7 @@ const tabs = [
 
 export default function NavBar() {
   const location = useLocation();
+  const { startCurrentTour, hasCurrentTour } = useTour();
 
   // Hide navbar on login page
   if (location.pathname === "/login") {
@@ -22,7 +24,7 @@ export default function NavBar() {
       <div style={styles.inner}>
         <div style={styles.brand}>Fantasy Basketball</div>
 
-        <nav style={styles.nav}>
+        <nav style={styles.nav} data-tour="nav-tabs">
           {tabs.map((t) => (
             <NavLink
               key={t.to}
@@ -39,6 +41,15 @@ export default function NavBar() {
         </nav>
 
         <div style={styles.rightSlot}>
+          <button
+            type="button"
+            onClick={startCurrentTour}
+            disabled={!hasCurrentTour}
+            style={styles.tourBtn}
+            title={hasCurrentTour ? "Start guided tour for this page" : "No tour for this page"}
+          >
+            Tour
+          </button>
           <NavLink
             to="/help"
             style={({ isActive }) => ({
@@ -47,6 +58,7 @@ export default function NavBar() {
             })}
             aria-label="Help"
             title="Help"
+            data-tour="help-button"
           >
             ?
           </NavLink>
@@ -80,6 +92,9 @@ const styles = {
   },
   rightSlot: {
     justifySelf: "end",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
   },
   nav: {
     justifySelf: "center",
@@ -118,6 +133,16 @@ const styles = {
     fontWeight: 900,
     fontSize: 18,
     lineHeight: 1,
+  },
+  tourBtn: {
+    padding: "8px 12px",
+    borderRadius: 999,
+    border: "1px solid rgba(127,223,255,0.18)",
+    background: "rgba(127,223,255,0.08)",
+    color: "#dff7ff",
+    fontWeight: 800,
+    fontSize: 12,
+    letterSpacing: 0.2,
   },
   helpBtnActive: {
     background: "rgba(127,223,255,0.18)",

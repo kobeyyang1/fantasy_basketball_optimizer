@@ -108,3 +108,15 @@ tbody tr:hover td {
 tbody tr:last-child td {
   border-bottom: none;
 }
+
+@keyframes tourPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    border-color: rgba(127, 223, 255, 0.9);
+  }
+  50% {
+    transform: scale(1.004);
+    border-color: rgba(168, 234, 255, 1);
+  }
+}

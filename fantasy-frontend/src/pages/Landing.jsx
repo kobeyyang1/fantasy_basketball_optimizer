@@ -26,7 +26,7 @@ const quickLinks = [
 export default function Landing() {
   return (
     <section style={styles.page}>
-      <div style={styles.heroWrap}>
+      <div style={styles.heroWrap} data-tour="landing-hero">
         <div style={styles.badge}>Fantasy Basketball Assistant</div>
         <h1 style={styles.title}>Fantasy Basketball Lineup Optimizer & Performance Predictor</h1>
         <p style={styles.subtitle}>
@@ -35,7 +35,7 @@ export default function Landing() {
           clearer draft decisions.
         </p>
 
-        <div style={styles.ctaRow}>
+        <div style={styles.ctaRow} data-tour="landing-cta">
           <Link to="/dashboard" style={styles.primaryCta}>
             Open Dashboard
           </Link>
@@ -45,7 +45,7 @@ export default function Landing() {
         </div>
       </div>
 
-      <div style={styles.cardsGrid}>
+      <div style={styles.cardsGrid} data-tour="landing-links">
         {quickLinks.map((item) => (
           <Link key={item.to} to={item.to} style={styles.card}>
             <div style={styles.cardTitle}>{item.title}</div>

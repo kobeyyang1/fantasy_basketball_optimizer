@@ -185,14 +185,17 @@ export default function Explainability() {
 
   return (
     <div>
-      <h2>Explainability</h2>
-      <p>
-        This list matches Dashboard rankings when Risk Weight = 0. Click a player
-        name to see SHAP impacts on the ML score.
-      </p>
+      <div data-tour="explain-header">
+        <h2>Explainability</h2>
+        <p>
+          This list matches Dashboard rankings when Risk Weight = 0. Click a player
+          name to see SHAP impacts on the ML score.
+        </p>
+      </div>
 
       {/* Controls */}
       <div
+        data-tour="explain-controls"
         style={{
           display: "flex",
           gap: 14,
@@ -225,7 +228,7 @@ export default function Explainability() {
         <Loading text="Loading rankings..." />
       ) : (
         <>
-          <ol style={{ lineHeight: 1.9, paddingLeft: 22 }}>
+          <ol style={{ lineHeight: 1.9, paddingLeft: 22 }} data-tour="explain-list">
             {shown.map((p) => (
               <li key={p.player_id}>
                 <span

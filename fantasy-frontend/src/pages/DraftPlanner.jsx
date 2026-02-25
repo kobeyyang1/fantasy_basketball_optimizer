@@ -873,13 +873,18 @@ export default function DraftPlanner() {
 
   return (
     <div>
-      <h2>Draft Planner</h2>
-      <p style={{ color: "rgba(255,255,255,0.75)" }}>
-        Track who is drafted and who is still available using your roto + durability ranking.
-        Mock Draft mode can auto-pick for every other manager using roster fit and category-focused AI profiles.
-      </p>
+      <div data-tour="draft-header">
+        <h2>Draft Planner</h2>
+        <p style={{ color: "rgba(255,255,255,0.75)" }}>
+          Track who is drafted and who is still available using your roto + durability ranking.
+          Mock Draft mode can auto-pick for every other manager using roster fit and category-focused AI profiles.
+        </p>
+      </div>
 
-      <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 16, alignItems: "end" }}>
+      <div
+        data-tour="draft-controls"
+        style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 16, alignItems: "end" }}
+      >
         <div style={{ opacity: mockIsActive ? 0.7 : 1 }}>
           <SeasonDropdown value={season} onChange={handleSeasonChange} seasons={seasons} />
         </div>
@@ -984,7 +989,7 @@ export default function DraftPlanner() {
             alignItems: "start",
           }}
         >
-          <div style={styles.boardPane}>
+          <div style={styles.boardPane} data-tour="draft-board">
             <h3>
               Available Players ({availablePlayers.length})
               {mockIsActive && mockDraft?.status === "user_turn" ? " - Your turn" : ""}
@@ -1073,7 +1078,7 @@ export default function DraftPlanner() {
             </div>
           </div>
 
-          <section style={{ ...styles.workspaceShell, minWidth: 0 }}>
+          <section style={{ ...styles.workspaceShell, minWidth: 0 }} data-tour="draft-workspace">
             <div style={styles.workspaceHeader}>
               <div>
                 <div style={styles.workspaceTitle}>Draft Room Workspace</div>

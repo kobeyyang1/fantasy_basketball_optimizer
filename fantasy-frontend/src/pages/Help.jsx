@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useTour } from "../tour/useTour";
 
 const pageGuides = [
   {
@@ -74,9 +75,11 @@ const apps = [
 ];
 
 export default function Help() {
+  const { hasTourForPath, startForPath } = useTour();
+
   return (
     <section style={styles.page}>
-      <div style={styles.hero}>
+      <div style={styles.hero} data-tour="help-hero">
         <div style={styles.badge}>Help & Guide</div>
         <h1 style={styles.title}>How to Use This Fantasy Basketball Assistant</h1>
         <p style={styles.subtitle}>
@@ -87,14 +90,25 @@ export default function Help() {
       </div>
 
       <Section title="What Each Page Does">
-        <div style={styles.grid}>
+        <div style={styles.grid} data-tour="help-page-guides">
           {pageGuides.map((item) => (
             <div key={item.path} style={styles.card}>
               <div style={styles.cardTop}>
                 <div style={styles.cardTitle}>{item.title}</div>
-                <Link to={item.path} style={styles.jumpLink}>
-                  Open
-                </Link>
+                <div style={styles.cardActions}>
+                  {hasTourForPath(item.path) && (
+                    <button
+                      type="button"
+                      onClick={() => startForPath(item.path)}
+                      style={styles.tourLinkBtn}
+                    >
+                      Tour
+                    </button>
+                  )}
+                  <Link to={item.path} style={styles.jumpLink}>
+                    Open
+                  </Link>
+                </div>
               </div>
               <div style={styles.cardText}>{item.detail}</div>
             </div>
@@ -342,6 +356,11 @@ const styles = {
     alignItems: "center",
     gap: 8,
   },
+  cardActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
   cardTitle: {
     fontSize: 16,
     fontWeight: 800,
@@ -367,6 +386,16 @@ const styles = {
     padding: "5px 10px",
     background: "rgba(127,223,255,0.07)",
     whiteSpace: "nowrap",
+  },
+  tourLinkBtn: {
+    borderRadius: 999,
+    border: "1px solid rgba(127,223,255,0.22)",
+    background: "rgba(127,223,255,0.10)",
+    color: "#d9f6ff",
+    padding: "5px 10px",
+    fontSize: 13,
+    fontWeight: 800,
+    lineHeight: 1.2,
   },
   infoBlock: {
     borderRadius: 12,

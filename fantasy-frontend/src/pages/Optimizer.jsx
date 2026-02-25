@@ -500,13 +500,15 @@ export default function Optimizer() {
 
   return (
     <div>
-      <h2>Optimizer</h2>
-      <p>
-        Builds lineups using <b>category targets + diminishing returns</b> so locks & focus categories actually
-        change the result.
-      </p>
+      <div data-tour="optimizer-header">
+        <h2>Optimizer</h2>
+        <p>
+          Builds lineups using <b>category targets + diminishing returns</b> so locks & focus categories actually
+          change the result.
+        </p>
+      </div>
 
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", margin: "14px 0" }}>
+      <div data-tour="optimizer-controls" style={{ display: "flex", gap: 16, flexWrap: "wrap", margin: "14px 0" }}>
         <div>
           <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>Season</div>
           <SeasonDropdown value={season} onChange={setSeason} seasons={seasons} />
@@ -553,7 +555,7 @@ export default function Optimizer() {
       </div>
 
       {/* Build-around: search only */}
-      <div style={{ marginTop: 10, maxWidth: 520 }}>
+      <div data-tour="optimizer-locks" style={{ marginTop: 10, maxWidth: 520 }}>
         <h3>Build around (optional — up to 3 players)</h3>
 
         {loadingPlayers ? (
@@ -633,7 +635,7 @@ export default function Optimizer() {
         )}
       </div>
 
-      <div style={{ marginTop: 14 }}>
+      <div data-tour="optimizer-focus" style={{ marginTop: 14 }}>
         <h3>Focus categories</h3>
         <div style={{ color: "#aaa", marginBottom: 8 }}>
           Focus cats have higher target thresholds (the build actively tries to “win” them).
@@ -641,7 +643,7 @@ export default function Optimizer() {
         <PuntSelector value={focusCats} onChange={setFocusCats} />
       </div>
 
-      <div style={{ marginTop: 14 }}>
+      <div data-tour="optimizer-punt" style={{ marginTop: 14 }}>
         <h3>Punt categories</h3>
         <div style={{ color: "#aaa", marginBottom: 8 }}>Punted cats are ignored in scoring.</div>
         <PuntSelector value={puntCats} onChange={setPuntCats} />
@@ -650,11 +652,11 @@ export default function Optimizer() {
       {loading || loadingLeague ? (
         <Loading text="Loading optimizer data..." />
       ) : lineups.length === 0 ? (
-        <div style={{ marginTop: 16, color: "#aaa" }}>
+        <div data-tour="optimizer-results" style={{ marginTop: 16, color: "#aaa" }}>
           Click <b>Generate lineup</b> to see a draft plan.
         </div>
       ) : (
-        <div style={{ marginTop: 18, display: "grid", gap: 14 }}>
+        <div data-tour="optimizer-results" style={{ marginTop: 18, display: "grid", gap: 14 }}>
           {lineups.map((b) => (
             <div
               key={b.title}
