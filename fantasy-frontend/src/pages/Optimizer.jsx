@@ -44,8 +44,8 @@ function snakePick(leagueSize, draftSlot1Indexed, round1Indexed) {
 // Higher rank number = later pick = more likely available.
 function availabilityProb(rank, pick) {
   // rank smaller = earlier pick (harder to still be available later)
-  const softness = 6; // tweak: higher = softer curve
-  const x = (rank - pick) / softness; // flipped
+  const softness = 7;
+  const x = (rank - pick) / softness;
   return 1 / (1 + Math.exp(-x));
 }
 
@@ -160,7 +160,9 @@ function scoreCandidate({
   focusCats,
   puntCats,
   pick,
+  nextPick,
   rank,
+  combinedScore,
   riskRaw,
 }) {
   const targets = buildTargets({ focusCats, puntCats });
@@ -175,7 +177,14 @@ function scoreCandidate({
   });
 
   const prob = availabilityProb(rank, pick);
-  const reachPressure = 1 - prob; // higher when prob is low
+  if (prob < 0.22) return { score: -Infinity, prob, catGain };
+
+  const probNext = nextPick ? availabilityProb(rank, nextPick) : 0;
+  const urgency = clamp(prob - probNext, 0, 1);
+  const valueDelta = pick - rank; // positive = value, negative = reach
+  const reachPenalty = valueDelta < -2 ? Math.abs(valueDelta + 2) / 18 : 0;
+  const valueBonus = valueDelta > 0 ? Math.min(valueDelta / 22, 1.2) : 0;
+  const rawValue = num(combinedScore) ?? 0;
   const dur = num(riskRaw) ?? 0;
 
   let antiOverstack = 0;
@@ -192,12 +201,16 @@ function scoreCandidate({
   }
 
   const score =
-    catGain * 40.0 + // BIG driver
-    dur * 0.9 +
-    reachPressure * 0.6 -
-    antiOverstack * 3.0;
+    catGain * 34.0 +
+    rawValue * 1.6 +
+    urgency * 2.8 +
+    dur * 0.5 +
+    valueBonus * 1.2 -
+    antiOverstack * 3.0 -
+    reachPenalty * 2.6;
 
-  return { score, prob, catGain };
+  const buildScore = catGain * 34.0 + rawValue * 1.6 + dur * 0.5 - antiOverstack * 3.0;
+  return { score, buildScore, prob, catGain };
 }
 
 function buildLineup({
@@ -279,6 +292,7 @@ function buildLineup({
     if (slotsRemaining.length === 0) break;
 
     const overall = snakePick(leagueSize, draftSlot, round);
+    const nextOverall = round < rounds ? snakePick(leagueSize, draftSlot, round + 1) : null;
 
     // candidate set: can fill remaining slots
     const candidates = [];
@@ -303,28 +317,48 @@ function buildLineup({
 
     if (!candidates.length) continue;
 
-    let best = null;
-    let bestScore = -Infinity;
+    const evaluated = [];
 
     for (const c of candidates) {
-      const { score } = scoreCandidate({
+      const { score, buildScore, prob } = scoreCandidate({
         playerId: c.r.player_id,
         zById,
         teamZByCat,
         focusCats,
         puntCats,
         pick: overall,
+        nextPick: nextOverall,
         rank: c.rank,
+        combinedScore: c.r.combined_score,
         riskRaw: c.r.risk_raw,
       });
 
-      if (score > bestScore) {
-        bestScore = score;
-        best = c;
-      }
+      if (!Number.isFinite(score)) continue;
+      evaluated.push({ ...c, score, buildScore, prob });
     }
 
-    if (!best) continue;
+    if (!evaluated.length) continue;
+
+    evaluated.sort((a, b) => {
+      if (b.buildScore !== a.buildScore) return b.buildScore - a.buildScore;
+      return b.score - a.score;
+    });
+    const best = evaluated[0];
+
+    let second = null;
+    const safer = evaluated.filter((e) => e.r.player_id !== best.r.player_id && e.prob > best.prob + 0.08);
+    if (safer.length) {
+      safer.sort((a, b) => {
+        if (b.buildScore !== a.buildScore) return b.buildScore - a.buildScore;
+        return b.prob - a.prob;
+      });
+      second = safer[0];
+    } else {
+      const byProb = evaluated
+        .filter((e) => e.r.player_id !== best.r.player_id)
+        .sort((a, b) => b.prob - a.prob || b.buildScore - a.buildScore);
+      if (byProb.length) second = byProb[0];
+    }
 
     const eligible = normalizePos(best.s.position);
 
@@ -350,6 +384,15 @@ function buildLineup({
       team: best.s.team || "-",
       slot: assignedSlot,
       availability: availabilityProb(best.rank, overall),
+      second_option: second
+        ? {
+            player_id: second.r.player_id,
+            name: second.r.player_name,
+            pos: second.s.position || "-",
+            team: second.s.team || "-",
+            availability: second.prob,
+          }
+        : null,
       note: null,
     });
   }
@@ -696,9 +739,9 @@ export default function Optimizer() {
                       <th>Round</th>
                       <th>Overall</th>
                       <th>Player</th>
-                      <th>Pos</th>
-                      <th>Team</th>
                       <th>Availability</th>
+                      <th>2nd Option</th>
+                      <th>2nd Avail.</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -710,11 +753,32 @@ export default function Optimizer() {
                         <td>
                           <b>{p.name}</b>{" "}
                           {p.note ? <span style={{ color: "#ffd166" }}>({p.note})</span> : null}
+                          {!p.note ? (
+                            <span style={{ color: "#aaa" }}>
+                              {" "}
+                              ({p.pos} | {p.team})
+                            </span>
+                          ) : null}
                         </td>
-                        <td>{p.pos}</td>
-                        <td>{p.team}</td>
                         <td style={{ textAlign: "right" }}>
                           {p.note === "LOCK" ? "Locked" : `${Math.round((p.availability ?? 0) * 100)}%`}
+                        </td>
+                        <td>
+                          {p.note === "LOCK" || !p.second_option ? (
+                            "-"
+                          ) : (
+                            <>
+                              <b>{p.second_option.name}</b>{" "}
+                              <span style={{ color: "#aaa" }}>
+                                ({p.second_option.pos} | {p.second_option.team})
+                              </span>
+                            </>
+                          )}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          {p.note === "LOCK" || !p.second_option
+                            ? "-"
+                            : `${Math.round((p.second_option.availability ?? 0) * 100)}%`}
                         </td>
                       </tr>
                     ))}
