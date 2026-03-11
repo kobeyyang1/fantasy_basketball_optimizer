@@ -1,5 +1,5 @@
 // src/pages/DraftPlanner.jsx
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import Loading from "../components/Loading";
 import SeasonDropdown from "../components/SeasonDropdown";
 import RiskSlider from "../components/RiskSlider";
@@ -10,6 +10,7 @@ import { loadJSON, saveJSON } from "../utils/storage";
 
 const STORAGE_KEY = "draftPlannerState_v1";
 const POSITIONS = ["All", "PG", "SG", "SF", "PF", "C", "G", "F"];
+const AI_PICK_DELAY_MS = 2000;
 const MOCK_CATEGORIES = [
   "fg_pct",
   "ft_pct",
@@ -240,6 +241,19 @@ function currentTurnInfo(draft) {
   return { overall, round, pickInRound, managerSlot };
 }
 
+function syncMockDraftTurnState(draft) {
+  const turn = currentTurnInfo(draft);
+  if (!turn) {
+    draft.status = "complete";
+    draft.currentTurn = null;
+    return draft;
+  }
+
+  draft.currentTurn = turn;
+  draft.status = turn.managerSlot === draft.userSlot ? "user_turn" : "running";
+  return draft;
+}
+
 function applyPickToDraft(nextDraft, player, managerSlot, reason) {
   const turn = currentTurnInfo(nextDraft);
   if (!turn) return nextDraft;
@@ -319,42 +333,39 @@ function selectCpuPick({ draft, manager, players, takenSet }) {
   return best;
 }
 
-function runCpuUntilUserTurn(draft, players) {
+function advanceMockDraftOneCpuPick(draft, players) {
   const next = cloneMockDraft(draft);
-  const totalPicks = next.leagueSize * next.rounds;
-  const takenSet = new Set(next.picks.map((p) => p.player_id));
-
-  while (next.currentOverallPick <= totalPicks) {
-    const turn = currentTurnInfo(next);
-    if (!turn) break;
-
-    if (turn.managerSlot === next.userSlot) {
-      next.status = "user_turn";
-      next.currentTurn = turn;
-      return next;
-    }
-
-    const manager = next.managers.find((m) => m.slot === turn.managerSlot);
-    if (!manager) {
-      next.status = "complete";
-      next.currentTurn = null;
-      return next;
-    }
-
-    const choice = selectCpuPick({ draft: next, manager, players, takenSet });
-    if (!choice?.player) {
-      next.status = "complete";
-      next.currentTurn = null;
-      return next;
-    }
-
-    applyPickToDraft(next, choice.player, manager.slot, choice.reason);
-    takenSet.add(choice.player.player_id);
+  const turn = currentTurnInfo(next);
+  if (!turn) {
+    next.status = "complete";
+    next.currentTurn = null;
+    return next;
   }
 
-  next.status = "complete";
-  next.currentTurn = null;
-  return next;
+  if (turn.managerSlot === next.userSlot) {
+    next.status = "user_turn";
+    next.currentTurn = turn;
+    return next;
+  }
+
+  const takenSet = new Set(next.picks.map((p) => p.player_id));
+  const manager = next.managers.find((m) => m.slot === turn.managerSlot);
+  if (!manager) {
+    next.status = "complete";
+    next.currentTurn = null;
+    return next;
+  }
+
+  const choice = selectCpuPick({ draft: next, manager, players, takenSet });
+  if (!choice?.player) {
+    next.status = "complete";
+    next.currentTurn = null;
+    return next;
+  }
+
+  applyPickToDraft(next, choice.player, manager.slot, choice.reason);
+  takenSet.add(choice.player.player_id);
+  return syncMockDraftTurnState(next);
 }
 
 function draftUserAndAdvance(prevDraft, playerId, players) {
@@ -371,7 +382,7 @@ function draftUserAndAdvance(prevDraft, playerId, players) {
   if (!player) return prevDraft;
 
   applyPickToDraft(next, player, next.userSlot, "User pick");
-  return runCpuUntilUserTurn(next, players);
+  return syncMockDraftTurnState(next);
 }
 
 export default function DraftPlanner() {
@@ -420,11 +431,23 @@ export default function DraftPlanner() {
       .finally(() => setLoading(false));
   }, [season, riskWeight]);
 
+  const enrichedPlayers = useMemo(() => {
+    return (players || []).map((p) => {
+      const pid = Number(p.player_id);
+      const row = statsById?.get(pid) ?? statsById?.get(String(pid)) ?? null;
+      return {
+        ...p,
+        position: row?.position || p.position || "-",
+        team: row?.team || p.team || "-",
+      };
+    });
+  }, [players, statsById]);
+
   const playerById = useMemo(() => {
     const m = new Map();
-    (players || []).forEach((p) => m.set(Number(p.player_id), p));
+    enrichedPlayers.forEach((p) => m.set(Number(p.player_id), p));
     return m;
-  }, [players]);
+  }, [enrichedPlayers]);
 
   const mockIsActive = !!mockDraft;
   const mockPickByPlayerId = useMemo(() => {
@@ -450,14 +473,14 @@ export default function DraftPlanner() {
 
   const availablePlayers = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return (players || [])
+    return enrichedPlayers
       .filter((p) => !draftedSet.has(Number(p.player_id)))
       .filter((p) => (!q ? true : (p.player_name || "").toLowerCase().includes(q)))
       .filter((p) => {
         if (posFilter === "All") return true;
         return String(p.position || "").toUpperCase().includes(posFilter);
       });
-  }, [players, draftedSet, query, posFilter]);
+  }, [enrichedPlayers, draftedSet, query, posFilter]);
 
   const myTeam = useMemo(
     () => activeMyTeamIds.map((id) => playerById.get(Number(id))).filter(Boolean),
@@ -465,6 +488,7 @@ export default function DraftPlanner() {
   );
 
   const currentMockTurn = mockDraft?.currentTurn || currentTurnInfo(mockDraft);
+  const activeMockManagerSlot = currentMockTurn?.managerSlot ?? null;
   const isMyMockTurn =
     !!mockDraft &&
     mockDraft.status === "user_turn" &&
@@ -488,7 +512,7 @@ export default function DraftPlanner() {
         alert("It is not your turn in the mock draft.");
         return;
       }
-      setMockDraft((prev) => draftUserAndAdvance(prev, playerId, players));
+      setMockDraft((prev) => draftUserAndAdvance(prev, playerId, enrichedPlayers));
       return;
     }
 
@@ -504,7 +528,7 @@ export default function DraftPlanner() {
   };
 
   const startMockDraft = () => {
-    if (!players.length) {
+    if (!enrichedPlayers.length) {
       alert("Rankings are still loading.");
       return;
     }
@@ -529,7 +553,7 @@ export default function DraftPlanner() {
 
     setDraftedIds([]);
     setMyTeamIds([]);
-    setMockDraft(runCpuUntilUserTurn(initialDraft, players));
+    setMockDraft(syncMockDraftTurnState(initialDraft));
   };
 
   const onUndoLastPick = () => {
@@ -572,9 +596,29 @@ export default function DraftPlanner() {
       .filter((x) => x.player);
   }, [mockIsActive, mockDraft, playerById, activeDraftedIds, myTeamSet]);
 
-  const mockManagers = mockDraft?.managers || [];
+  const mockManagers = useMemo(() => mockDraft?.managers || [], [mockDraft]);
   const recentMockPicks = useMemo(() => (mockDraft?.picks || []).slice(-8).reverse(), [mockDraft]);
+  const mockBoardRounds = useMemo(() => {
+    if (!mockDraft) return [];
+
+    const pickByRoundAndManager = new Map();
+    (mockDraft.picks || []).forEach((pick) => {
+      pickByRoundAndManager.set(`${pick.round}-${pick.managerSlot}`, pick);
+    });
+
+    return Array.from({ length: mockDraft.rounds }, (_, idx) => {
+      const round = idx + 1;
+      return {
+        round,
+        picks: mockManagers.map((manager) => ({
+          manager,
+          pick: pickByRoundAndManager.get(`${round}-${manager.slot}`) || null,
+        })),
+      };
+    });
+  }, [mockDraft, mockManagers]);
   const mockLayoutActive = mockRoomOpen || mockIsActive;
+  const mockBoardTemplateColumns = `96px repeat(${Math.max(mockManagers.length, 1)}, minmax(170px, 1fr))`;
   const activeWorkspaceTab =
     !mockLayoutActive && workspaceTab === "mock" ? "my-team" : workspaceTab;
 
@@ -595,6 +639,19 @@ export default function DraftPlanner() {
     setLoading(true);
     setRiskWeight(nextRisk);
   };
+
+  useEffect(() => {
+    if (!mockDraft || mockDraft.status !== "running" || !enrichedPlayers.length) return undefined;
+
+    const timer = window.setTimeout(() => {
+      setMockDraft((prev) => {
+        if (!prev || prev.status !== "running") return prev;
+        return advanceMockDraftOneCpuPick(prev, enrichedPlayers);
+      });
+    }, AI_PICK_DELAY_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [mockDraft, enrichedPlayers]);
 
   const tableStyle = {
     width: "100%",
@@ -752,6 +809,115 @@ export default function DraftPlanner() {
     managerChipUser: {
       border: "1px solid rgba(127,223,255,0.3)",
       background: "rgba(127,223,255,0.08)",
+    },
+    managerChipActive: {
+      border: "1px solid rgba(255, 214, 102, 0.45)",
+      background: "rgba(255, 214, 102, 0.12)",
+      boxShadow: "0 0 0 1px rgba(255, 214, 102, 0.18) inset",
+    },
+    mockBoardShell: {
+      borderRadius: 18,
+      border: "1px solid rgba(255,255,255,0.08)",
+      background:
+        "linear-gradient(180deg, rgba(10,18,34,0.98) 0%, rgba(7,13,27,0.98) 100%)",
+      overflow: "hidden",
+      boxShadow: "0 22px 50px rgba(0,0,0,0.32)",
+    },
+    mockBoardScroller: {
+      overflowX: "auto",
+      overflowY: "auto",
+      padding: 14,
+      maxHeight: 720,
+    },
+    mockBoardGrid: {
+      display: "grid",
+      gap: 10,
+      minWidth: "max-content",
+      alignItems: "start",
+    },
+    mockRoundLabel: {
+      minHeight: 110,
+      borderRadius: 12,
+      border: "1px solid rgba(255,255,255,0.08)",
+      background: "rgba(255,255,255,0.03)",
+      color: "rgba(255,255,255,0.72)",
+      display: "grid",
+      placeItems: "center",
+      fontWeight: 800,
+      fontSize: 12,
+      letterSpacing: 0.4,
+      textTransform: "uppercase",
+    },
+    mockManagerHeader: {
+      minHeight: 88,
+      borderRadius: 14,
+      border: "1px solid rgba(255,255,255,0.1)",
+      background: "rgba(255,255,255,0.04)",
+      padding: "10px 12px",
+      color: "#fff",
+      display: "grid",
+      gap: 4,
+    },
+    mockManagerHeaderUser: {
+      border: "1px solid rgba(127,223,255,0.32)",
+      background: "rgba(127,223,255,0.1)",
+    },
+    mockManagerHeaderActive: {
+      border: "1px solid rgba(255, 214, 102, 0.5)",
+      background: "rgba(255, 214, 102, 0.14)",
+      boxShadow: "0 0 0 1px rgba(255, 214, 102, 0.18) inset",
+    },
+    mockBoardCell: {
+      minHeight: 110,
+      borderRadius: 14,
+      border: "1px solid rgba(255,255,255,0.08)",
+      background: "rgba(255,255,255,0.03)",
+      padding: "10px 12px",
+      display: "grid",
+      alignContent: "space-between",
+      gap: 8,
+      color: "#fff",
+    },
+    mockBoardCellPicked: {
+      background: "linear-gradient(135deg, rgba(127,223,255,0.18), rgba(103,80,164,0.18))",
+      border: "1px solid rgba(255,255,255,0.12)",
+    },
+    mockBoardCellUser: {
+      background: "linear-gradient(135deg, rgba(127,223,255,0.28), rgba(127,223,255,0.12))",
+      border: "1px solid rgba(127,223,255,0.3)",
+    },
+    mockBoardCellActive: {
+      border: "1px solid rgba(255, 214, 102, 0.52)",
+      background: "linear-gradient(135deg, rgba(255,214,102,0.22), rgba(255,214,102,0.08))",
+      boxShadow: "0 0 0 1px rgba(255, 214, 102, 0.18) inset",
+    },
+    mockBoardCellEmpty: {
+      color: "rgba(255,255,255,0.42)",
+      fontSize: 12,
+      alignContent: "center",
+      justifyItems: "center",
+      textAlign: "center",
+    },
+    mockBoardPlayerName: {
+      fontWeight: 800,
+      lineHeight: 1.2,
+      fontSize: 14,
+      overflow: "hidden",
+      display: "-webkit-box",
+      WebkitLineClamp: 2,
+      WebkitBoxOrient: "vertical",
+    },
+    mockBoardMeta: {
+      fontSize: 12,
+      color: "rgba(255,255,255,0.72)",
+      lineHeight: 1.35,
+    },
+    mockBoardPickNo: {
+      fontSize: 11,
+      fontWeight: 800,
+      color: "rgba(255,255,255,0.65)",
+      letterSpacing: 0.35,
+      textTransform: "uppercase",
     },
     workspaceShell: {
       borderRadius: 16,
@@ -981,17 +1147,272 @@ export default function DraftPlanner() {
       {loading || loadingLeague ? (
         <Loading text="Loading draft planner..." />
       ) : (
-        <div
-          style={{
-            display: "grid",
-            gap: 18,
-            gridTemplateColumns: mockLayoutActive ? "minmax(0, 1fr) minmax(380px, 460px)" : "1fr",
-            alignItems: "start",
-          }}
-        >
+        <div style={{ display: "grid", gap: 18 }}>
+          {mockLayoutActive && activeWorkspaceTab === "mock" && (
+            <section style={styles.mockBoardShell} data-tour="draft-workspace">
+              <div style={styles.sideCardHeader}>
+                <div>
+                  <div style={styles.sideCardTitle}>Mock Draft Room</div>
+                  <div style={styles.sideCardSub}>
+                    Managers across the top, rounds down the left, and the player pool below.
+                  </div>
+                </div>
+                <div style={styles.statusPill}>
+                  {mockDraft?.status === "user_turn"
+                    ? "Your Turn"
+                    : mockDraft?.status === "complete"
+                      ? "Complete"
+                      : mockDraft
+                        ? "Running"
+                        : "Idle"}
+                </div>
+              </div>
+
+              <div style={styles.mockInfoGrid}>
+                <div>
+                  <div style={styles.fieldLabel}>League Size</div>
+                  <select
+                    value={mockLeagueSize}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      setMockLeagueSize(n);
+                      setMockUserSlot((prev) => clamp(prev, 1, n));
+                    }}
+                    disabled={mockIsActive}
+                    style={styles.fieldSelect}
+                  >
+                    {[8, 10, 12, 14, 16].map((n) => (
+                      <option key={n} value={n}>
+                        {n} teams
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <div style={styles.fieldLabel}>Rounds</div>
+                  <select
+                    value={mockRounds}
+                    onChange={(e) => setMockRounds(Number(e.target.value))}
+                    disabled={mockIsActive}
+                    style={styles.fieldSelect}
+                  >
+                    {[8, 9, 10, 11, 12, 13].map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <div style={styles.fieldLabel}>Your Pick</div>
+                  <select
+                    value={mockUserSlotMode}
+                    onChange={(e) => setMockUserSlotMode(e.target.value)}
+                    disabled={mockIsActive}
+                    style={styles.fieldSelect}
+                  >
+                    <option value="manual">Choose Slot</option>
+                    <option value="random">Randomize Slot</option>
+                  </select>
+                </div>
+
+                <div>
+                  <div style={styles.fieldLabel}>
+                    {mockUserSlotMode === "random" ? "Preview" : "Slot Number"}
+                  </div>
+                  <select
+                    value={mockUserSlot}
+                    onChange={(e) => setMockUserSlot(Number(e.target.value))}
+                    disabled={mockIsActive || mockUserSlotMode === "random"}
+                    style={styles.fieldSelect}
+                  >
+                    {Array.from({ length: mockLeagueSize }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={n}>
+                        Pick {n}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ padding: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  style={styles.miniBtn}
+                  onClick={startMockDraft}
+                  disabled={mockIsActive || !enrichedPlayers.length}
+                >
+                  Start Mock Draft
+                </button>
+                <button
+                  style={styles.miniBtnDanger}
+                  onClick={() => setMockDraft(null)}
+                  disabled={!mockIsActive}
+                >
+                  End Mock
+                </button>
+              </div>
+
+              {mockIsActive && (
+                <>
+                  <div style={styles.turnHighlight}>
+                    <div>
+                      <b>Season:</b> {mockDraft.season} | <b>Risk Weight:</b> {mockDraft.riskWeight}
+                    </div>
+                    <div>
+                      <b>Your slot:</b> Pick {mockDraft.userSlot} | <b>Progress:</b>{" "}
+                      {mockDraft.picks.length}/{mockDraft.leagueSize * mockDraft.rounds} picks
+                    </div>
+                    <div>
+                      {mockDraft.status === "user_turn" && currentMockTurn
+                        ? `Round ${currentMockTurn.round}, pick ${currentMockTurn.pickInRound} (overall ${currentMockTurn.overall}) is your turn.`
+                        : mockDraft.status === "complete"
+                          ? "Mock draft is complete."
+                          : currentMockTurn
+                            ? `Round ${currentMockTurn.round}, pick ${currentMockTurn.pickInRound} (overall ${currentMockTurn.overall}): Manager ${currentMockTurn.managerSlot} is on the clock.`
+                            : "The simulator is advancing CPU picks."}
+                    </div>
+                  </div>
+
+                  <div style={styles.mockBoardScroller}>
+                    <div
+                      style={{
+                        ...styles.mockBoardGrid,
+                        gridTemplateColumns: mockBoardTemplateColumns,
+                      }}
+                    >
+                      <div style={styles.mockRoundLabel}>Board</div>
+                      {mockManagers.map((m) => (
+                        <div
+                          key={m.slot}
+                          style={{
+                            ...styles.mockManagerHeader,
+                            ...(m.isUser ? styles.mockManagerHeaderUser : {}),
+                            ...(activeMockManagerSlot === m.slot ? styles.mockManagerHeaderActive : {}),
+                          }}
+                        >
+                          <div style={{ fontWeight: 900 }}>{m.label}</div>
+                          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.74)" }}>
+                            Focus: {m.focusCats.join(", ")}
+                          </div>
+                          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.58)" }}>
+                            Punt: {m.puntCats.join(", ") || "None"}
+                          </div>
+                        </div>
+                      ))}
+
+                      {mockBoardRounds.map((roundRow) => (
+                        <Fragment key={`round-${roundRow.round}`}>
+                          <div style={styles.mockRoundLabel}>Round {roundRow.round}</div>
+                          {roundRow.picks.map(({ manager, pick }) => {
+                            const isActiveCell =
+                              activeMockManagerSlot === manager.slot &&
+                              currentMockTurn?.round === roundRow.round &&
+                              !pick &&
+                              mockDraft?.status === "running";
+
+                            return (
+                              <div
+                                key={`${roundRow.round}-${manager.slot}`}
+                                style={{
+                                  ...styles.mockBoardCell,
+                                  ...(pick ? styles.mockBoardCellPicked : styles.mockBoardCellEmpty),
+                                  ...(pick?.isUser ? styles.mockBoardCellUser : {}),
+                                  ...(isActiveCell ? styles.mockBoardCellActive : {}),
+                                }}
+                              >
+                                {pick ? (
+                                  <>
+                                    <div>
+                                      <div style={styles.mockBoardPickNo}>Pick #{pick.overall}</div>
+                                      <div style={styles.mockBoardPlayerName}>{pick.player_name}</div>
+                                    </div>
+                                    <div style={styles.mockBoardMeta}>
+                                      {pick.position || "-"} | {pick.team || "-"} | {pick.assignedSlot}
+                                      <br />
+                                      {pick.reason}
+                                    </div>
+                                  </>
+                                ) : isActiveCell ? (
+                                  <>
+                                    <div style={styles.mockBoardPickNo}>On The Clock</div>
+                                    <div style={styles.mockBoardPlayerName}>{manager.label}</div>
+                                    <div style={styles.mockBoardMeta}>
+                                      Selecting in 2 seconds...
+                                    </div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div style={styles.mockBoardPickNo}>Pending</div>
+                                    <div>Waiting for this round slot.</div>
+                                  </>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </Fragment>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{ padding: "0 14px 14px" }}>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "rgba(255,255,255,0.65)",
+                        marginBottom: 8,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 10,
+                      }}
+                    >
+                      <span>Recent picks</span>
+                      <button
+                        type="button"
+                        style={styles.linkBtn}
+                        onClick={() => setShowAllPicksPopup(true)}
+                        disabled={!mockDraft?.picks?.length}
+                        title={mockDraft?.picks?.length ? "View all draft picks" : "No picks yet"}
+                      >
+                        View all picks
+                      </button>
+                    </div>
+                    <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                      {recentMockPicks.length === 0 ? (
+                        <div style={styles.emptyState}>No picks yet.</div>
+                      ) : (
+                        recentMockPicks.map((p) => (
+                          <div
+                            key={`${p.overall}-${p.player_id}`}
+                            style={{
+                              borderRadius: 10,
+                              border: "1px solid rgba(255,255,255,0.08)",
+                              background: "rgba(255,255,255,0.02)",
+                              padding: "8px 10px",
+                              fontSize: 12,
+                            }}
+                          >
+                            <div style={{ color: "#fff", fontWeight: 700 }}>
+                              #{p.overall} {p.player_name} ({p.managerLabel})
+                            </div>
+                            <div style={{ color: "rgba(255,255,255,0.68)" }}>
+                              Round {p.round} | {p.position || "-"} | Slot {p.assignedSlot}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </section>
+          )}
+
           <div style={styles.boardPane} data-tour="draft-board">
             <h3>
-              Available Players ({availablePlayers.length})
+              {mockLayoutActive ? "Player Pool" : "Available Players"} ({availablePlayers.length})
               {mockIsActive && mockDraft?.status === "user_turn" ? " - Your turn" : ""}
               {mockIsActive && mockDraft?.status === "complete" ? " - Mock complete" : ""}
             </h3>
@@ -1078,14 +1499,14 @@ export default function DraftPlanner() {
             </div>
           </div>
 
-          <section style={{ ...styles.workspaceShell, minWidth: 0 }} data-tour="draft-workspace">
+          <section style={{ ...styles.workspaceShell, minWidth: 0 }}>
             <div style={styles.workspaceHeader}>
               <div>
                 <div style={styles.workspaceTitle}>Draft Room Workspace</div>
                 <div style={{ ...styles.sideCardSub, marginTop: 2 }}>
                   {mockLayoutActive
-                    ? "Mock draft view: rankings on the left, draft room on the right."
-                    : "Tracking workspace for your roster and drafted players. Open mock layout to simulate a draft side-by-side."}
+                    ? "Track your roster and the rest of the room while the board stays above the player pool."
+                    : "Tracking workspace for your roster and drafted players. Open mock layout to simulate a live draft board."}
                 </div>
               </div>
 
@@ -1110,208 +1531,12 @@ export default function DraftPlanner() {
             </div>
 
             <div style={styles.workspaceBody}>
-              {mockLayoutActive && activeWorkspaceTab === "mock" && (
-                <div style={styles.sideCard}>
-                  <div style={styles.sideCardHeader}>
-                    <div>
-                      <div style={styles.sideCardTitle}>Mock Draft</div>
-                      <div style={styles.sideCardSub}>
-                        Auto-picks for all other managers using roster fit + category focus
-                      </div>
-                    </div>
-                    <div style={styles.statusPill}>
-                      {mockDraft?.status === "user_turn"
-                        ? "Your Turn"
-                        : mockDraft?.status === "complete"
-                          ? "Complete"
-                          : mockDraft
-                            ? "Running"
-                            : "Idle"}
-                    </div>
+              {activeWorkspaceTab === "mock" && (
+                <div style={styles.emptyState}>
+                  Mock draft board is shown above the player pool.
+                  <div style={styles.emptyHint}>
+                    Switch to My Team or Mock Picks (Others) here for supporting panels.
                   </div>
-
-                  <div style={styles.mockInfoGrid}>
-                    <div>
-                      <div style={styles.fieldLabel}>League Size</div>
-                      <select
-                        value={mockLeagueSize}
-                        onChange={(e) => {
-                          const n = Number(e.target.value);
-                          setMockLeagueSize(n);
-                          setMockUserSlot((prev) => clamp(prev, 1, n));
-                        }}
-                        disabled={mockIsActive}
-                        style={styles.fieldSelect}
-                      >
-                        {[8, 10, 12, 14, 16].map((n) => (
-                          <option key={n} value={n}>
-                            {n} teams
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <div style={styles.fieldLabel}>Rounds</div>
-                      <select
-                        value={mockRounds}
-                        onChange={(e) => setMockRounds(Number(e.target.value))}
-                        disabled={mockIsActive}
-                        style={styles.fieldSelect}
-                      >
-                        {[8, 9, 10, 11, 12, 13].map((n) => (
-                          <option key={n} value={n}>
-                            {n}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <div style={styles.fieldLabel}>Your Pick</div>
-                      <select
-                        value={mockUserSlotMode}
-                        onChange={(e) => setMockUserSlotMode(e.target.value)}
-                        disabled={mockIsActive}
-                        style={styles.fieldSelect}
-                      >
-                        <option value="manual">Choose Slot</option>
-                        <option value="random">Randomize Slot</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <div style={styles.fieldLabel}>
-                        {mockUserSlotMode === "random" ? "Preview" : "Slot Number"}
-                      </div>
-                      <select
-                        value={mockUserSlot}
-                        onChange={(e) => setMockUserSlot(Number(e.target.value))}
-                        disabled={mockIsActive || mockUserSlotMode === "random"}
-                        style={styles.fieldSelect}
-                      >
-                        {Array.from({ length: mockLeagueSize }, (_, i) => i + 1).map((n) => (
-                          <option key={n} value={n}>
-                            Pick {n}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div style={{ padding: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button
-                      style={styles.miniBtn}
-                      onClick={startMockDraft}
-                      disabled={mockIsActive || !players.length}
-                    >
-                      Start Mock Draft
-                    </button>
-                    <button
-                      style={styles.miniBtnDanger}
-                      onClick={() => setMockDraft(null)}
-                      disabled={!mockIsActive}
-                    >
-                      End Mock
-                    </button>
-                  </div>
-
-                  {mockIsActive && (
-                    <>
-                      <div style={styles.turnHighlight}>
-                        <div>
-                          <b>Season:</b> {mockDraft.season} | <b>Risk Weight:</b> {mockDraft.riskWeight}
-                        </div>
-                        <div>
-                          <b>Your slot:</b> Pick {mockDraft.userSlot} | <b>Progress:</b>{" "}
-                          {mockDraft.picks.length}/{mockDraft.leagueSize * mockDraft.rounds} picks
-                        </div>
-                        <div>
-                          {mockDraft.status === "user_turn" && currentMockTurn
-                            ? `Round ${currentMockTurn.round}, pick ${currentMockTurn.pickInRound} (overall ${currentMockTurn.overall}) is your turn.`
-                            : mockDraft.status === "complete"
-                              ? "Mock draft is complete."
-                              : "The simulator is advancing CPU picks."}
-                        </div>
-                      </div>
-
-                      <div style={{ padding: "0 12px 10px", color: "rgba(255,255,255,0.7)", fontSize: 12 }}>
-                        AI manager profiles (focus / punt categories):
-                      </div>
-                      <div style={styles.managerChipWrap}>
-                        {mockManagers.map((m) => (
-                          <div
-                            key={m.slot}
-                            style={{
-                              ...styles.managerChip,
-                              ...(m.isUser ? styles.managerChipUser : {}),
-                            }}
-                          >
-                            <div style={{ fontWeight: 800, marginBottom: 4 }}>{m.label}</div>
-                            <div style={{ opacity: 0.9 }}>Focus: {m.focusCats.join(", ")}</div>
-                            <div style={{ opacity: 0.8 }}>Punt: {m.puntCats.join(", ") || "None"}</div>
-                            <div style={{ opacity: 0.7, marginTop: 2 }}>
-                              Picks: {m.rosterIds.length}/{mockDraft.rounds}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div style={{ padding: "0 12px 12px" }}>
-                        <div
-                          style={{
-                            fontSize: 12,
-                            color: "rgba(255,255,255,0.65)",
-                            marginBottom: 8,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: 10,
-                          }}
-                        >
-                          <span>Recent picks</span>
-                          <button
-                            type="button"
-                            style={styles.linkBtn}
-                            onClick={() => setShowAllPicksPopup(true)}
-                            disabled={!mockDraft?.picks?.length}
-                            title={
-                              mockDraft?.picks?.length
-                                ? "View all draft picks"
-                                : "No picks yet"
-                            }
-                          >
-                            View all picks
-                          </button>
-                        </div>
-                        <div style={{ display: "grid", gap: 8 }}>
-                          {recentMockPicks.length === 0 ? (
-                            <div style={styles.emptyState}>No picks yet.</div>
-                          ) : (
-                            recentMockPicks.map((p) => (
-                              <div
-                                key={`${p.overall}-${p.player_id}`}
-                                style={{
-                                  borderRadius: 10,
-                                  border: "1px solid rgba(255,255,255,0.08)",
-                                  background: "rgba(255,255,255,0.02)",
-                                  padding: "8px 10px",
-                                  fontSize: 12,
-                                }}
-                              >
-                                <div style={{ color: "#fff", fontWeight: 700 }}>
-                                  #{p.overall} {p.player_name} ({p.managerLabel})
-                                </div>
-                                <div style={{ color: "rgba(255,255,255,0.68)" }}>
-                                  Round {p.round} | {p.position || "-"} | Slot {p.assignedSlot} | {p.reason}
-                                </div>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                    </>
-                  )}
                 </div>
               )}
 

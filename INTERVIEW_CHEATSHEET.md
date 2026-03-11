@@ -107,6 +107,7 @@
 
 ### Entry + Routing
 - `fantasy-frontend/src/main.jsx` — React entry point.
+  - Wraps app with `TourProvider` so guided tours are available globally.
 - `fantasy-frontend/src/App.jsx` — routes + layout + navbar.
 
 ### API Clients
@@ -127,7 +128,8 @@
 - `fantasy-frontend/src/pages/Dashboard.jsx`
   - Main rankings view (roto + risk). Computes z-scores client-side for color coding.
 - `fantasy-frontend/src/pages/Optimizer.jsx`
-  - Draft lineup builder using category targets, diminishing returns, and availability probability.
+  - Draft lineup builder using category targets, diminishing returns, and snake-draft availability probability.
+  - Supports optional locked players, focus/punt categories, and a fallback "2nd Option" per non-locked pick.
 - `fantasy-frontend/src/pages/DraftPlanner.jsx`
   - Draft board with drafted tracking + z-score colors.
 - `fantasy-frontend/src/pages/Explainability.jsx`
@@ -139,6 +141,7 @@
 
 ### Shared Components
 - `fantasy-frontend/src/components/NavBar.jsx` — top navigation.
+  - Includes page-level "Start tour" trigger.
 - `fantasy-frontend/src/components/RequireAuth.jsx` — protects routes using token.
 - `fantasy-frontend/src/components/SeasonDropdown.jsx` — season selector.
 - `fantasy-frontend/src/components/RiskSlider.jsx` — risk weight UI.
@@ -146,6 +149,16 @@
 - `fantasy-frontend/src/components/PlayerStatsTable.jsx` / `PlayerTable.jsx` / `StatCell.jsx` — stats tables + styling.
 - `fantasy-frontend/src/components/Modal.jsx` — explainability popup.
 - `fantasy-frontend/src/components/Loading.jsx` — loading state.
+
+### Tour System (Guided UI Walkthrough)
+- `fantasy-frontend/src/tour/tourSteps.js`
+  - Central map of per-route tour steps (`selector`, `title`, `body`) and path normalization.
+- `fantasy-frontend/src/tour/TourProvider.jsx`
+  - Tour engine/state manager: start/stop, step progression, route-aware startup, target highlighting, tooltip positioning, keyboard shortcuts, and overlay rendering via React portal.
+- `fantasy-frontend/src/tour/useTour.js`
+  - Hook for consuming tour controls from components/pages.
+- `data-tour="..."` attributes across pages/components
+  - Mark DOM anchors used by the tour selectors.
 
 ### Utils
 - `fantasy-frontend/src/utils/storage.js`
