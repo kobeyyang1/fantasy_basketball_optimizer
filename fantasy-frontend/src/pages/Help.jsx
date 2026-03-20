@@ -99,6 +99,7 @@ export default function Help() {
                   {hasTourForPath(item.path) && (
                     <button
                       type="button"
+                      // Lets the Help page launch a tour for another route.
                       onClick={() => startForPath(item.path)}
                       style={styles.tourLinkBtn}
                     >

@@ -63,7 +63,6 @@ def import_nba_season_stats(db: Session, season: str) -> dict:
         row.fga = float(data.get("FGA", 0) or 0)
         row.fgm = float(data.get("FGM", 0) or 0)
         row.fg_pct = float(data.get("FG_PCT", 0) or 0)
-
         row.fta = float(data.get("FTA", 0) or 0)
         row.ftm = float(data.get("FTM", 0) or 0)
         row.ft_pct = float(data.get("FT_PCT", 0) or 0)

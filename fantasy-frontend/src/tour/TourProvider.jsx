@@ -12,6 +12,8 @@ export function TourProvider({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // Core tour state: whether the tour is open, which step is active, and where the
+  // highlighted element currently sits on screen.
   const [active, setActive] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [steps, setSteps] = useState([]);
@@ -40,6 +42,8 @@ export function TourProvider({ children }) {
     const nextSteps = tourByPath[normalized] || [];
     if (!nextSteps.length) return false;
 
+    // If the requested tour belongs to another page, navigate there first and
+    // remember the path so the tour can begin after routing finishes.
     if (normalizeTourPath(location.pathname) !== normalized) {
       setPendingPath(normalized);
       navigate(path);
@@ -56,6 +60,7 @@ export function TourProvider({ children }) {
   const startCurrentTour = () => startForPath(location.pathname);
 
   useEffect(() => {
+    // After route navigation completes, start the tour that was requested from another page.
     if (!pendingPath) return;
     if (currentPath !== pendingPath) return;
     const nextSteps = tourByPath[pendingPath] || [];
@@ -82,6 +87,8 @@ export function TourProvider({ children }) {
     if (!active || !currentStep) return;
 
     const computeRect = () => {
+      // Find the DOM element for the current step and measure it so the overlay
+      // can draw a highlight box around it.
       const target = currentStep.selector
         ? document.querySelector(currentStep.selector)
         : null;
@@ -101,12 +108,14 @@ export function TourProvider({ children }) {
       });
       setStepMissing(false);
 
+      // Scroll the target into view so the highlighted element is visible before the user reads the tooltip.
       if (typeof target.scrollIntoView === "function") {
         target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
       }
     };
 
     const schedule = () => {
+      // requestAnimationFrame avoids measuring layout in the middle of React rendering.
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(computeRect);
     };
@@ -126,6 +135,7 @@ export function TourProvider({ children }) {
   }, [active, currentStep, stepIndex]);
 
   useEffect(() => {
+    // Basic keyboard controls make the tour usable without clicking the buttons.
     if (!active) return;
     const onKeyDown = (e) => {
       if (e.key === "Escape") stop();
@@ -148,6 +158,7 @@ export function TourProvider({ children }) {
     const panelWidth = Math.min(PANEL_W, vw - 24);
 
     if (!rect) {
+      // If no target is visible, center the tooltip and show the step as a general note.
       return {
         top: Math.max(12, vh / 2 - 110),
         left: Math.max(12, (vw - panelWidth) / 2),
@@ -178,6 +189,7 @@ export function TourProvider({ children }) {
     <TourContext.Provider value={value}>
       {children}
       {active &&
+        // Render the overlay at document.body level so it sits above the whole app.
         createPortal(
           <TourOverlay
             rect={rect}
@@ -221,6 +233,7 @@ function TourOverlay({
 
   return (
     <div style={overlayStyles.root} aria-live="polite">
+      {/* Clicking outside the panel closes the tour. */}
       <div style={overlayStyles.scrim} onClick={onClose} />
 
       {rect && (
@@ -236,6 +249,7 @@ function TourOverlay({
         />
       )}
 
+      {/* When there is no target element, dim the full screen instead of cutting out a highlight hole. */}
       {!rect && <div style={overlayStyles.fullMask} />}
 
       <section

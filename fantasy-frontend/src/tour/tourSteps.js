@@ -1,3 +1,4 @@
+// Reusable steps that appear on multiple pages so the tour stays consistent.
 const commonNavSteps = [
   {
     selector: '[data-tour="nav-tabs"]',
@@ -11,6 +12,8 @@ const commonNavSteps = [
   },
 ];
 
+// Each route maps to an ordered list of tour steps.
+// The selector must match a real element in the page markup via a data-tour attribute.
 export const tourByPath = {
   "/": [
     {
@@ -143,7 +146,7 @@ export const tourByPath = {
 };
 
 export function normalizeTourPath(pathname) {
+  // Keep older/alternate routes pointing at the same step definition.
   if (pathname === "/explainability") return "/explain";
   return pathname;
 }
-

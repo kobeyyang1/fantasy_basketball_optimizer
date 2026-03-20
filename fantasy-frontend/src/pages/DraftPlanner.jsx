@@ -22,8 +22,29 @@ const MOCK_CATEGORIES = [
   "blocks",
   "turnovers",
 ];
+const CPU_DIFFICULTY_PRESETS = {
+  normal: {
+    label: "Normal",
+    shortlistRange: [3, 5],
+    topBias: 0.84,
+    scoreNoise: 0.3,
+    mistakeChance: 0.035,
+    strategyDiscipline: 0.98,
+    tunnelVisionChance: 0.025,
+  },
+  hard: {
+    label: "Hard",
+    shortlistRange: [1, 1],
+    topBias: 1,
+    scoreNoise: 0,
+    mistakeChance: 0,
+    strategyDiscipline: 1.04,
+    tunnelVisionChance: 0,
+  },
+};
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+const selectOptionStyle = { backgroundColor: "#0f172a", color: "#f8fafc" };
 
 function snakeManagerSlot(leagueSize, overallPick) {
   const round = Math.ceil(overallPick / leagueSize);
@@ -39,6 +60,24 @@ function shuffle(arr) {
     [out[i], out[j]] = [out[j], out[i]];
   }
   return out;
+}
+
+function randInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function chooseWeighted(items, getWeight) {
+  if (!items.length) return null;
+  const weights = items.map((item, idx) => Math.max(0, Number(getWeight(item, idx) ?? 0)));
+  const total = weights.reduce((sum, w) => sum + w, 0);
+  if (total <= 0) return items[0];
+
+  let roll = Math.random() * total;
+  for (let i = 0; i < items.length; i += 1) {
+    roll -= weights[i];
+    if (roll <= 0) return items[i];
+  }
+  return items[items.length - 1];
 }
 
 function makeMockRosterTemplate(rounds) {
@@ -149,6 +188,7 @@ function scoreCpuCandidate({ player, manager, rounds, overallPick, overallRank, 
   const riskRaw = Number(player.risk_raw ?? 0);
   const playerZ = player.z_scores || {};
   const catGain = marginalCategoryGain({ manager, playerZ, rounds });
+  const profile = manager.aiProfile || CPU_DIFFICULTY_PRESETS.normal;
 
   const slotBonus =
     slotFit.slot === "UTIL" ? 0.2 : slotFit.slot === "G" || slotFit.slot === "F" ? 0.9 : 1.5;
@@ -165,17 +205,29 @@ function scoreCpuCandidate({ player, manager, rounds, overallPick, overallRank, 
 
   const valueGap = overallPick - overallRank;
   const valueGapScore = clamp(valueGap / 20, -1.5, 1.5);
-  const noise = (Math.random() - 0.5) * 0.8;
+  const managerVariance = Number(manager.decisionVariance ?? 1);
+  const strategicWeight = Number(profile.strategyDiscipline ?? 0.88) * managerVariance;
+  const focusWeight = (0.22 + (manager.strategyFlavor === "upside" ? 0.08 : 0)) * strategicWeight;
+  const riskWeight =
+    manager.strategyFlavor === "steady" ? 0.24 : manager.strategyFlavor === "upside" ? 0.12 : 0.18;
+  const valueWeight =
+    manager.strategyFlavor === "rankings" ? 1.18 : manager.strategyFlavor === "fit" ? 0.94 : 1;
+  const tunnelVisionPenalty =
+    manager.strategyFlavor === "specialist" && Math.random() < (profile.tunnelVisionChance ?? 0)
+      ? Math.max(0, combined - focusRaw * 0.65)
+      : 0;
+  const noise = (Math.random() - 0.5) * Number(profile.scoreNoise ?? 1);
 
   return (
     combined +
-    catGain * 5.8 +
+    catGain * 5.8 * strategicWeight +
     slotBonus +
     scarcityBonus +
-    focusRaw * 0.22 +
-    riskRaw * 0.18 +
-    valueGapScore -
-    puntPenalty * 0.14 +
+    focusRaw * focusWeight +
+    riskRaw * riskWeight +
+    valueGapScore * valueWeight -
+    puntPenalty * 0.14 * strategicWeight -
+    tunnelVisionPenalty +
     noise
   );
 }
@@ -188,24 +240,54 @@ function initTeamZ() {
 
 function sampleManagerStrategy() {
   const pool = shuffle(MOCK_CATEGORIES);
-  const focusCount = Math.random() < 0.55 ? 3 : 4;
+  const focusRoll = Math.random();
+  const focusCount = focusRoll < 0.18 ? 2 : focusRoll < 0.58 ? 3 : focusRoll < 0.88 ? 4 : 5;
   const focusCats = pool.slice(0, focusCount);
   const puntPool = pool.filter((c) => !focusCats.includes(c));
-  const puntCats = Math.random() < 0.45 && puntPool.length ? [puntPool[0]] : [];
+  const puntRoll = Math.random();
+  let puntCount = 0;
+  if (puntRoll > 0.52 && puntPool.length) puntCount = 1;
+  if (puntRoll > 0.84 && puntPool.length > 1) puntCount = 2;
+  const puntCats = shuffle(puntPool).slice(0, puntCount);
   return { focusCats, puntCats };
 }
 
-function createMockManagers({ leagueSize, userSlot, rounds }) {
+function sampleManagerProfile(difficulty) {
+  const preset = CPU_DIFFICULTY_PRESETS[difficulty] || CPU_DIFFICULTY_PRESETS.normal;
+  const flavorRoll = Math.random();
+  const strategyFlavor =
+    flavorRoll < 0.25
+      ? "fit"
+      : flavorRoll < 0.5
+        ? "rankings"
+        : flavorRoll < 0.75
+          ? "steady"
+          : flavorRoll < 0.9
+            ? "upside"
+            : "specialist";
+
+  return {
+    ...preset,
+    strategyFlavor,
+    decisionVariance: difficulty === "hard" ? 1 : 0.985 + Math.random() * 0.03,
+  };
+}
+
+function createMockManagers({ leagueSize, userSlot, rounds, cpuDifficulty }) {
   const rosterTemplate = makeMockRosterTemplate(rounds);
   return Array.from({ length: leagueSize }, (_, idx) => {
     const slot = idx + 1;
     const strategy = sampleManagerStrategy();
+    const aiProfile = sampleManagerProfile(cpuDifficulty);
     return {
       slot,
       label: slot === userSlot ? `You (Pick ${slot})` : `Manager ${slot}`,
       isUser: slot === userSlot,
       focusCats: strategy.focusCats,
       puntCats: strategy.puntCats,
+      aiProfile,
+      decisionVariance: aiProfile.decisionVariance,
+      strategyFlavor: aiProfile.strategyFlavor,
       slotsRemaining: [...rosterTemplate],
       rosterIds: [],
       teamZByCat: initTeamZ(),
@@ -221,6 +303,7 @@ function cloneMockDraft(draft) {
       ...m,
       focusCats: [...m.focusCats],
       puntCats: [...m.puntCats],
+      aiProfile: m.aiProfile ? { ...m.aiProfile } : null,
       slotsRemaining: [...m.slotsRemaining],
       rosterIds: [...m.rosterIds],
       teamZByCat: { ...m.teamZByCat },
@@ -297,8 +380,8 @@ function applyPickToDraft(nextDraft, player, managerSlot, reason) {
 }
 
 function selectCpuPick({ draft, manager, players, takenSet }) {
-  let best = null;
-  let bestScore = -Infinity;
+  const profile = manager.aiProfile || CPU_DIFFICULTY_PRESETS.normal;
+  const candidates = [];
   let checked = 0;
 
   for (let idx = 0; idx < players.length; idx += 1) {
@@ -319,18 +402,42 @@ function selectCpuPick({ draft, manager, players, takenSet }) {
       slotFit,
     });
 
-    if (score > bestScore) {
-      bestScore = score;
-      best = {
-        player: p,
-        reason: `${slotFit.slot} fit, ${chooseTopStrengthLabel(p, manager)}`,
-      };
-    }
+    candidates.push({
+      player: p,
+      score,
+      overallRank: idx + 1,
+      slotFit,
+      reason: `${slotFit.slot} fit, ${chooseTopStrengthLabel(p, manager)}`,
+    });
 
-    if (checked >= 140 && best) break;
+    if (checked >= 140 && candidates.length) break;
   }
 
-  return best;
+  if (!candidates.length) return null;
+
+  candidates.sort((a, b) => b.score - a.score);
+  if (draft.cpuDifficulty === "hard") return candidates[0];
+
+  const [minShortlist, maxShortlist] = profile.shortlistRange || [4, 8];
+  const shortlistSize = clamp(randInt(minShortlist, maxShortlist), 1, candidates.length);
+  const shortlist = candidates.slice(0, shortlistSize);
+  const topBias = Number(profile.topBias ?? 0.72);
+  const mistakeChance = Number(profile.mistakeChance ?? 0.16);
+
+  if (Math.random() < mistakeChance) {
+    const mistakePool = candidates.slice(0, clamp(shortlistSize + 4, 2, candidates.length));
+    return chooseWeighted(
+      mistakePool,
+      (candidate, idx) => 1 / Math.pow(idx + 1, Math.max(0.55, topBias))
+    );
+  }
+
+  return chooseWeighted(
+    shortlist,
+    (candidate, idx) =>
+      1 / Math.pow(idx + 1, Math.max(0.35, 1.8 - topBias)) +
+      clamp((200 - candidate.overallRank) / 220, 0, 0.35)
+  );
 }
 
 function advanceMockDraftOneCpuPick(draft, players) {
@@ -410,6 +517,7 @@ export default function DraftPlanner() {
   const [mockRounds, setMockRounds] = useState(11);
   const [mockUserSlotMode, setMockUserSlotMode] = useState("manual");
   const [mockUserSlot, setMockUserSlot] = useState(1);
+  const [mockCpuDifficulty, setMockCpuDifficulty] = useState("normal");
   const [mockDraft, setMockDraft] = useState(null);
   const [workspaceTab, setWorkspaceTab] = useState("mock");
   const [mockRoomOpen, setMockRoomOpen] = useState(false);
@@ -543,11 +651,17 @@ export default function DraftPlanner() {
       riskWeight,
       leagueSize: mockLeagueSize,
       rounds: mockRounds,
+      cpuDifficulty: mockCpuDifficulty,
       userSlot,
       status: "running",
       currentOverallPick: 1,
       currentTurn: null,
-      managers: createMockManagers({ leagueSize: mockLeagueSize, userSlot, rounds: mockRounds }),
+      managers: createMockManagers({
+        leagueSize: mockLeagueSize,
+        userSlot,
+        rounds: mockRounds,
+        cpuDifficulty: mockCpuDifficulty,
+      }),
       picks: [],
     };
 
@@ -773,6 +887,17 @@ export default function DraftPlanner() {
       border: "1px solid rgba(255,255,255,0.14)",
       background: "rgba(255,255,255,0.05)",
       color: "#fff",
+      colorScheme: "dark",
+    },
+    mockMetaNote: {
+      margin: "0 12px 12px",
+      padding: "10px 12px",
+      borderRadius: 12,
+      border: "1px solid rgba(255,255,255,0.08)",
+      background: "rgba(255,255,255,0.03)",
+      color: "rgba(255,255,255,0.72)",
+      fontSize: 12,
+      lineHeight: 1.4,
     },
     statusPill: {
       display: "inline-flex",
@@ -1182,7 +1307,7 @@ export default function DraftPlanner() {
                     style={styles.fieldSelect}
                   >
                     {[8, 10, 12, 14, 16].map((n) => (
-                      <option key={n} value={n}>
+                      <option key={n} value={n} style={selectOptionStyle}>
                         {n} teams
                       </option>
                     ))}
@@ -1198,7 +1323,7 @@ export default function DraftPlanner() {
                     style={styles.fieldSelect}
                   >
                     {[8, 9, 10, 11, 12, 13].map((n) => (
-                      <option key={n} value={n}>
+                      <option key={n} value={n} style={selectOptionStyle}>
                         {n}
                       </option>
                     ))}
@@ -1213,8 +1338,8 @@ export default function DraftPlanner() {
                     disabled={mockIsActive}
                     style={styles.fieldSelect}
                   >
-                    <option value="manual">Choose Slot</option>
-                    <option value="random">Randomize Slot</option>
+                    <option value="manual" style={selectOptionStyle}>Choose Slot</option>
+                    <option value="random" style={selectOptionStyle}>Randomize Slot</option>
                   </select>
                 </div>
 
@@ -1229,12 +1354,34 @@ export default function DraftPlanner() {
                     style={styles.fieldSelect}
                   >
                     {Array.from({ length: mockLeagueSize }, (_, i) => i + 1).map((n) => (
-                      <option key={n} value={n}>
+                      <option key={n} value={n} style={selectOptionStyle}>
                         Pick {n}
                       </option>
                     ))}
                   </select>
                 </div>
+
+                <div>
+                  <div style={styles.fieldLabel}>CPU Difficulty</div>
+                  <select
+                    value={mockCpuDifficulty}
+                    onChange={(e) => setMockCpuDifficulty(e.target.value)}
+                    disabled={mockIsActive}
+                    style={styles.fieldSelect}
+                  >
+                    {Object.entries(CPU_DIFFICULTY_PRESETS).map(([key, preset]) => (
+                      <option key={key} value={key} style={selectOptionStyle}>
+                        {preset.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div style={styles.mockMetaNote}>
+                {mockCpuDifficulty === "hard"
+                  ? "Hard CPUs always take the mathematically best pick for their build."
+                  : "Normal CPUs draft strongly with only the slightest occasional human-like variance."}
               </div>
 
               <div style={{ padding: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1258,7 +1405,9 @@ export default function DraftPlanner() {
                 <>
                   <div style={styles.turnHighlight}>
                     <div>
-                      <b>Season:</b> {mockDraft.season} | <b>Risk Weight:</b> {mockDraft.riskWeight}
+                      <b>Season:</b> {mockDraft.season} | <b>Risk Weight:</b> {mockDraft.riskWeight} |{" "}
+                      <b>CPU:</b>{" "}
+                      {CPU_DIFFICULTY_PRESETS[mockDraft.cpuDifficulty]?.label || "Medium"}
                     </div>
                     <div>
                       <b>Your slot:</b> Pick {mockDraft.userSlot} | <b>Progress:</b>{" "}

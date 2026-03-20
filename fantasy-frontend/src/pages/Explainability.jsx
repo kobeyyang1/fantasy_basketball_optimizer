@@ -322,17 +322,13 @@ export default function Explainability() {
                   return (
                     <tr key={r.feature}>
                       <td>{r.feature}</td>
-
                       <td style={{ textAlign: "right" }}>
                         {formatAvg(r.feature, r.value, gp)}
                       </td>
-
                       <td style={{ textAlign: "right" }}>
                         {formatTotal(r.feature, r.value)}
                       </td>
-
                       <td style={{ textAlign: "right" }}>{shap.toFixed(3)}</td>
-
                       <td
                         style={{
                           fontWeight: 800,

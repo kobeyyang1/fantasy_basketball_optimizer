@@ -43,6 +43,7 @@ export default function NavBar() {
         <div style={styles.rightSlot}>
           <button
             type="button"
+            // Starts the set of steps defined for the page the user is currently viewing.
             onClick={startCurrentTour}
             disabled={!hasCurrentTour}
             style={styles.tourBtn}
@@ -58,6 +59,7 @@ export default function NavBar() {
             })}
             aria-label="Help"
             title="Help"
+            // Shared tour anchor used by commonNavSteps in tourSteps.js.
             data-tour="help-button"
           >
             ?
