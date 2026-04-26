@@ -8,9 +8,11 @@ import { useLeagueStats } from "../hooks/useLeagueStats";
 import { getRotoRiskRankings, getActivePlayersStats, getPlayersWithStats } from "../api/fantasyApi";
 import { createSavedItem } from "../api/fantasyApi";
 import { useNavigate } from "react-router-dom";
+import { tokenStore } from "../api/api";
 
 const DEFAULT_ROUNDS = 9;
 const DEFAULT_SLOTS = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL", "UTIL"];
+const PENDING_SAVE_KEY = "pending_optimizer_save_v1";
 
 const ALL_CATS = [
   "fg_pct",
@@ -287,12 +289,12 @@ function buildLineup({
   // Start drafting AFTER locks
   const startRound = chosen.length + 1;
 
-  for (let round = startRound; round <= rounds; round++) {
+  for (let round = startRound; round <= rounds; round++) { // controls how many rounds the optimizer plans for.
     if (chosen.length >= slots.length) break;
     if (slotsRemaining.length === 0) break;
 
-    const overall = snakePick(leagueSize, draftSlot, round);
-    const nextOverall = round < rounds ? snakePick(leagueSize, draftSlot, round + 1) : null;
+    const overall = snakePick(leagueSize, draftSlot, round); // overall = current pick number
+    const nextOverall = round < rounds ? snakePick(leagueSize, draftSlot, round + 1) : null; // nextOverall = your next pick number
 
     // candidate set: can fill remaining slots
     const candidates = [];
@@ -339,14 +341,14 @@ function buildLineup({
 
     if (!evaluated.length) continue;
 
-    evaluated.sort((a, b) => {
+    evaluated.sort((a, b) => { // second option logic
       if (b.buildScore !== a.buildScore) return b.buildScore - a.buildScore;
       return b.score - a.score;
     });
     const best = evaluated[0];
 
     let second = null;
-    const safer = evaluated.filter((e) => e.r.player_id !== best.r.player_id && e.prob > best.prob + 0.08);
+    const safer = evaluated.filter((e) => e.r.player_id !== best.r.player_id && e.prob > best.prob + 0.08); //alternative player must have > 0.08 availability probability than the best player
     if (safer.length) {
       safer.sort((a, b) => {
         if (b.buildScore !== a.buildScore) return b.buildScore - a.buildScore;
@@ -449,7 +451,7 @@ export default function Optimizer() {
         const [ranksRes, statsRes] = await Promise.all([
           getRotoRiskRankings({ season, risk_weight: 0, limit: 500 }),
           getActivePlayersStats({ season }),
-        ]);
+        ]); // optimizer loads from chosen season
 
         if (cancelled) return;
 
@@ -473,6 +475,37 @@ export default function Optimizer() {
       cancelled = true;
     };
   }, [season]);
+
+  useEffect(() => {
+    const token = tokenStore.get();
+    const pendingRaw = sessionStorage.getItem(PENDING_SAVE_KEY);
+    if (!token || !pendingRaw) return;
+
+    let pending;
+    try {
+      pending = JSON.parse(pendingRaw);
+    } catch {
+      sessionStorage.removeItem(PENDING_SAVE_KEY);
+      return;
+    }
+
+    if (!pending?.payload) {
+      sessionStorage.removeItem(PENDING_SAVE_KEY);
+      return;
+    }
+
+    createSavedItem(pending)
+      .then(() => {
+        sessionStorage.removeItem(PENDING_SAVE_KEY);
+        alert("Saved!");
+      })
+      .catch((e) => {
+        if (e?.response?.status !== 401) {
+          alert("Save failed.");
+          sessionStorage.removeItem(PENDING_SAVE_KEY);
+        }
+      });
+  }, []);
 
   const disabledIds = useMemo(() => new Set(lockedIds), [lockedIds]);
 
@@ -527,16 +560,21 @@ export default function Optimizer() {
   };
 
   const saveLineup = async (lineupObject) => {
+    const payload = {
+      kind: "lineup",
+      title: "Lineup 1",
+      season,
+      payload: lineupObject,
+    };
+
     try {
-      await createSavedItem({
-        kind: "lineup",
-        title: "Lineup 1",
-        season,
-        payload: lineupObject, // store exactly what you render
-      });
+      await createSavedItem(payload);
       alert("Saved!");
     } catch (e) {
-      if (e?.response?.status === 401) nav("/login");
+      if (e?.response?.status === 401) {
+        sessionStorage.setItem(PENDING_SAVE_KEY, JSON.stringify(payload));
+        nav("/login", { state: { from: "/optimizer" } });
+      }
       else alert("Save failed.");
     }
   };

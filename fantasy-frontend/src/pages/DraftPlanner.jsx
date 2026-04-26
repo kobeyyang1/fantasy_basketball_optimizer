@@ -311,7 +311,7 @@ function cloneMockDraft(draft) {
   };
 }
 
-function currentTurnInfo(draft) {
+function currentTurnInfo(draft) { // calculates current turn
   if (!draft) return null;
   const totalPicks = draft.leagueSize * draft.rounds;
   if (draft.currentOverallPick > totalPicks) return null;
@@ -324,7 +324,7 @@ function currentTurnInfo(draft) {
   return { overall, round, pickInRound, managerSlot };
 }
 
-function syncMockDraftTurnState(draft) {
+function syncMockDraftTurnState(draft) { // decides draft status
   const turn = currentTurnInfo(draft);
   if (!turn) {
     draft.status = "complete";
@@ -635,7 +635,7 @@ export default function DraftPlanner() {
     setMyTeamIds([]);
   };
 
-  const startMockDraft = () => {
+  const startMockDraft = () => { //start draft
     if (!enrichedPlayers.length) {
       alert("Rankings are still loading.");
       return;
@@ -646,7 +646,7 @@ export default function DraftPlanner() {
         ? Math.floor(Math.random() * mockLeagueSize) + 1
         : clamp(mockUserSlot, 1, mockLeagueSize);
 
-    const initialDraft = {
+    const initialDraft = { // creates brand new draft
       season,
       riskWeight,
       leagueSize: mockLeagueSize,
@@ -754,7 +754,7 @@ export default function DraftPlanner() {
     setRiskWeight(nextRisk);
   };
 
-  useEffect(() => {
+  useEffect(() => { // timers for cpu picks
     if (!mockDraft || mockDraft.status !== "running" || !enrichedPlayers.length) return undefined;
 
     const timer = window.setTimeout(() => {

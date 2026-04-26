@@ -47,6 +47,8 @@ def load_rf_model():
             )
         print(f"[INFO] Loading RandomForest model from {model_path}")
         _rf_model = joblib.load(model_path)
+        if hasattr(_rf_model, "n_jobs"):
+            _rf_model.n_jobs = 1
 
     return _rf_model
 

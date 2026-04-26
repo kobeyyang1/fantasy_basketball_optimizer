@@ -9,7 +9,6 @@ from app.core.security import decode_access_token
 from app.models.user import User
 
 from app.core import security
-print("DEBUG DEPS SECRET_KEY:", security.SECRET_KEY)
 
 bearer_scheme = HTTPBearer()
 

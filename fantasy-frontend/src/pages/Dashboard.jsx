@@ -65,11 +65,11 @@ function bgFromZ(z, invert = false) {
   }
   const val = invert ? -z : z;
   const t = clamp(Math.abs(val) / 2.25, 0, 1);
-  const alpha = 0.08 + t * 0.50;
+  const alpha = 0.08 + t * 0.50; // controls how strong the coloring is at different z-scores. 2.25 is ~99th percentile in a normal distribution, so that and above get the max alpha.
 
   const good = "34,197,94";
   const bad = "239,68,68";
-  const rgb = val >= 0 ? good : bad;
+  const rgb = val >= 0 ? good : bad; // positive (green) vs negative (red)
 
   return { backgroundColor: `rgba(${rgb}, ${alpha})`, color: "#f8fafc" };
 }
@@ -137,6 +137,7 @@ export default function Dashboard() {
     return m;
   }, [rankings]);
 
+  // Search function
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return rankings || [];

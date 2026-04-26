@@ -4,6 +4,7 @@ import NavBar from "./components/NavBar";
 import RequireAuth from "./components/RequireAuth";
 
 import Login from "./pages/Login";
+import Register from "./pages/Register";
 import Landing from "./pages/Landing";
 import Dashboard from "./pages/Dashboard";
 import Optimizer from "./pages/Optimizer";
@@ -22,6 +23,7 @@ export default function App() {
           <Routes>
             {/* Public */}
             <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
             <Route path="/" element={<Landing />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/optimizer" element={<Optimizer />} />

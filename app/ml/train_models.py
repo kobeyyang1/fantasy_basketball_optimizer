@@ -46,13 +46,13 @@ def build_training_dataframe(db: Session) -> pd.DataFrame:
 
     rows: List[Dict] = []
 
-    players = db.query(Player).all()
+    players = db.query(Player).all() # pulls players and stats from database
     for p in players:
         stats: PlayerStats | None = p.stats
         if not stats:
             continue
 
-        row = {
+        row = { # creates a row for each player
             "player_id": p.id,
             "name": p.name,
             "fg_pct": stats.fg_pct,

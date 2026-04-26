@@ -1,9 +1,5 @@
 // src/api/fantasyApi.js
-import axios from "axios";
-
-const api = axios.create({
-  baseURL: "http://localhost:8000",
-});
+import api from "./api";
 
 const DEFAULT_SEASON = "2025-26";
 const SEASON_STORAGE_KEY = "selectedSeason_v1";
@@ -91,8 +87,6 @@ export const getExplainabilityList = (params = {}) => {
   });
 };
 
-export default api;
-
 // Interview: Save a user item to the backend.
 export const createSavedItem = (payload) =>
   api.post("/fantasy/saved", payload);
@@ -104,4 +98,6 @@ export const listSavedItems = () =>
 // Interview: Delete a saved item.
 export const deleteSavedItem = (id) =>
   api.delete(`/fantasy/saved/${id}`);
+
+export default api;
 

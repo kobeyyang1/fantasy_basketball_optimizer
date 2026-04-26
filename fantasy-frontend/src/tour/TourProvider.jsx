@@ -37,8 +37,8 @@ export function TourProvider({ children }) {
     setPendingPath(null);
   };
 
-  const startForPath = (path) => {
-    const normalized = normalizeTourPath(path);
+  const startForPath = (path) => { // runs when user starts a tour
+    const normalized = normalizeTourPath(path); 
     const nextSteps = tourByPath[normalized] || [];
     if (!nextSteps.length) return false;
 

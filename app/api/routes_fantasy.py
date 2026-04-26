@@ -30,7 +30,6 @@ from app.schemas.player import (
 )
 
 from app.db.session import SQLALCHEMY_DATABASE_URL
-print("🚨 FASTAPI USING DB:", SQLALCHEMY_DATABASE_URL)
 
 
 router = APIRouter(tags=["fantasy"])

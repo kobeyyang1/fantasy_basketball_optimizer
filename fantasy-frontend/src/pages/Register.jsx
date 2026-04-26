@@ -1,28 +1,39 @@
-// src/pages/Login.jsx
-import { useMemo, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { login } from "../api/authApi";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { login, register } from "../api/authApi";
 import { tokenStore } from "../api/api";
 
-export default function Login() {
+export default function Register() {
   const nav = useNavigate();
-  const location = useLocation();
-
-  const redirectTo = useMemo(() => {
-    return location.state?.from || "/dashboard";
-  }, [location.state]);
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const onSubmit = async (e) => {
     e.preventDefault();
     setError("");
+
+    if (!email.trim() || !password) {
+      setError("Email and password are required.");
+      return;
+    }
+
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
     setBusy(true);
 
     try {
+      await register(email.trim(), password);
       const res = await login(email.trim(), password);
       const token = res.data?.access_token || res.data?.token;
 
@@ -31,10 +42,10 @@ export default function Login() {
       }
 
       tokenStore.set(token);
-      nav(redirectTo, { replace: true });
+      nav("/saved", { replace: true });
     } catch (err) {
-      console.error(err);
-      setError("Login failed. Check your email/password.");
+      const detail = err?.response?.data?.detail;
+      setError(typeof detail === "string" ? detail : "Registration failed. Try a different email.");
     } finally {
       setBusy(false);
     }
@@ -45,16 +56,16 @@ export default function Login() {
       <div style={styles.card}>
         <div style={styles.header}>
           <div style={styles.eyebrow}>Optional account</div>
-          <div style={styles.title}>Sign in</div>
+          <div style={styles.title}>Create account</div>
           <div style={styles.sub}>
-            All analysis tools remain open without login. Sign in only if you want to save and revisit optimized
+            All analysis tools remain open without login. Create an account only if you want to save your optimized
             lineups.
           </div>
         </div>
 
         <div style={styles.notice}>
-          Optimizer, dashboard, draft planner, and explainability pages are available to everyone. Login is only
-          needed for saved lineups.
+          Optimizer, dashboard, draft planner, and explainability tools are public. Login is only required for saved
+          lineups.
         </div>
 
         <form onSubmit={onSubmit} style={styles.form}>
@@ -74,9 +85,21 @@ export default function Login() {
             <input
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
+              placeholder="Enter at least 6 characters"
               type="password"
-              autoComplete="current-password"
+              autoComplete="new-password"
+              style={styles.input}
+            />
+          </label>
+
+          <label style={styles.label}>
+            Confirm password
+            <input
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Repeat your password"
+              type="password"
+              autoComplete="new-password"
               style={styles.input}
             />
           </label>
@@ -84,16 +107,16 @@ export default function Login() {
           {error ? <div style={styles.error}>{error}</div> : null}
 
           <button disabled={busy} style={{ ...styles.button, opacity: busy ? 0.75 : 1 }}>
-            {busy ? "Logging in..." : "Login"}
+            {busy ? "Creating account..." : "Register"}
           </button>
-
-          <div style={styles.hint}>
-            Need an account for saved lineups?{" "}
-            <Link to="/register" style={styles.link}>
-              Register here
-            </Link>
-          </div>
         </form>
+
+        <div style={styles.switchRow}>
+          Already have an account?{" "}
+          <Link to="/login" style={styles.link}>
+            Login
+          </Link>
+        </div>
       </div>
     </div>
   );
@@ -118,7 +141,6 @@ const styles = {
   header: {
     display: "grid",
     gap: 6,
-    marginBottom: 10,
   },
   eyebrow: {
     fontSize: 11,
@@ -130,16 +152,15 @@ const styles = {
   title: {
     fontSize: 24,
     fontWeight: 900,
-    color: "rgba(255,255,255,0.92)",
+    color: "rgba(255,255,255,0.94)",
   },
   sub: {
-    marginTop: 6,
     fontSize: 13,
-    color: "rgba(255,255,255,0.70)",
+    color: "rgba(255,255,255,0.72)",
     lineHeight: 1.5,
   },
   notice: {
-    marginTop: 12,
+    marginTop: 16,
     padding: "12px 14px",
     borderRadius: 14,
     border: "1px solid rgba(158,217,255,0.22)",
@@ -148,10 +169,10 @@ const styles = {
     fontSize: 13,
     lineHeight: 1.45,
   },
-  form: { display: "grid", gap: 12, marginTop: 12 },
+  form: { display: "grid", gap: 12, marginTop: 16 },
   label: { display: "grid", gap: 6, fontSize: 12, color: "rgba(255,255,255,0.75)" },
   input: {
-    padding: 10,
+    padding: 11,
     borderRadius: 12,
     border: "1px solid rgba(255,255,255,0.12)",
     background: "rgba(0,0,0,0.35)",
@@ -159,7 +180,7 @@ const styles = {
     outline: "none",
   },
   button: {
-    padding: 10,
+    padding: 11,
     borderRadius: 12,
     border: "1px solid rgba(255,255,255,0.16)",
     background: "rgba(255,255,255,0.92)",
@@ -175,10 +196,10 @@ const styles = {
     color: "rgba(255,210,210,0.95)",
     fontSize: 13,
   },
-  hint: {
-    fontSize: 12,
-    color: "rgba(255,255,255,0.55)",
-    marginTop: 6,
+  switchRow: {
+    marginTop: 16,
+    fontSize: 13,
+    color: "rgba(255,255,255,0.72)",
   },
   link: {
     color: "#9ed9ff",

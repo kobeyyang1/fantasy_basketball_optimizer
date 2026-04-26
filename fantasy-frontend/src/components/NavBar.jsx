@@ -1,5 +1,5 @@
-// src/components/NavBar.jsx
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { tokenStore } from "../api/api";
 import { useTour } from "../tour/useTour";
 
 const tabs = [
@@ -12,12 +12,18 @@ const tabs = [
 
 export default function NavBar() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { startCurrentTour, hasCurrentTour } = useTour();
+  const isAuthed = Boolean(tokenStore.get());
 
-  // Hide navbar on login page
-  if (location.pathname === "/login") {
+  if (location.pathname === "/login" || location.pathname === "/register") {
     return null;
   }
+
+  const onLogout = () => {
+    tokenStore.clear();
+    navigate("/", { replace: true });
+  };
 
   return (
     <header style={styles.header}>
@@ -41,9 +47,35 @@ export default function NavBar() {
         </nav>
 
         <div style={styles.rightSlot}>
+          {isAuthed ? (
+            <>
+              <NavLink
+                to="/saved"
+                style={({ isActive }) => ({
+                  ...styles.authLink,
+                  ...(isActive ? styles.authLinkActive : {}),
+                })}
+              >
+                Saved
+              </NavLink>
+              <button type="button" onClick={onLogout} style={styles.authButton}>
+                Logout
+              </button>
+            </>
+          ) : (
+            <NavLink
+              to="/login"
+              style={({ isActive }) => ({
+                ...styles.authLink,
+                ...(isActive ? styles.authLinkActive : {}),
+              })}
+            >
+              Login
+            </NavLink>
+          )}
+
           <button
             type="button"
-            // Starts the set of steps defined for the page the user is currently viewing.
             onClick={startCurrentTour}
             disabled={!hasCurrentTour}
             style={styles.tourBtn}
@@ -51,6 +83,7 @@ export default function NavBar() {
           >
             Tour
           </button>
+
           <NavLink
             to="/help"
             style={({ isActive }) => ({
@@ -59,7 +92,6 @@ export default function NavBar() {
             })}
             aria-label="Help"
             title="Help"
-            // Shared tour anchor used by commonNavSteps in tourSteps.js.
             data-tour="help-button"
           >
             ?
@@ -122,6 +154,32 @@ const styles = {
     background: "rgba(255,255,255,0.92)",
     boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
   },
+  authLink: {
+    padding: "8px 12px",
+    borderRadius: 999,
+    textDecoration: "none",
+    color: "rgba(255,255,255,0.86)",
+    background: "rgba(255,255,255,0.06)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    fontWeight: 700,
+    fontSize: 12,
+    letterSpacing: 0.2,
+  },
+  authLinkActive: {
+    background: "rgba(255,255,255,0.16)",
+    border: "1px solid rgba(255,255,255,0.22)",
+  },
+  authButton: {
+    padding: "8px 12px",
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.12)",
+    background: "rgba(255,255,255,0.04)",
+    color: "rgba(255,255,255,0.78)",
+    fontWeight: 700,
+    fontSize: 12,
+    letterSpacing: 0.2,
+    cursor: "pointer",
+  },
   helpBtn: {
     width: 36,
     height: 36,
@@ -145,6 +203,7 @@ const styles = {
     fontWeight: 800,
     fontSize: 12,
     letterSpacing: 0.2,
+    cursor: "pointer",
   },
   helpBtnActive: {
     background: "rgba(127,223,255,0.18)",
