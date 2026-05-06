@@ -98,9 +98,9 @@ def compute_roto_scores(
         inverted_categories = ["tov"]  # turnovers are bad by default
 
     # 1. Collect all values per category across all players
-    values_by_category: Dict[str, List[float]] = {cat: [] for cat in categories}
+    values_by_category: Dict[str, List[float]] = {cat: [] for cat in categories} # creates a dictionary where each fantasy vategory has an empty list.
 
-    for player in players:
+    for player in players: # loops through each player and every category
         for cat in categories:
             value = player.get(cat)
             # Ignore None / missing values
@@ -111,7 +111,7 @@ def compute_roto_scores(
     means: Dict[str, float] = {}
     stds: Dict[str, float] = {}
 
-    for cat in categories:
+    for cat in categories: # calculates mean & std dev for each category
         cat_values = values_by_category[cat]
         mean = _compute_mean(cat_values)
         std = _compute_std(cat_values, mean)
@@ -121,7 +121,7 @@ def compute_roto_scores(
     # 3. Compute z-scores and total roto value per player
     results: List[RotoCategoryResult] = []
 
-    for player in players:
+    for player in players: # loops through each player and calcuates z-score for each category
         player_id = int(player.get("player_id"))
         player_name = str(player.get("player_name", ""))
 
@@ -149,10 +149,10 @@ def compute_roto_scores(
 
             player_z_scores[cat] = z
 
-            weight = category_weights.get(cat, 1.0)
+            weight = category_weights.get(cat, 1.0) # default weight is 1.0 if not specified
             total_score += z * weight
 
-        results.append(RotoCategoryResult(
+        results.append(RotoCategoryResult( # after calculating z-scores, this stores the results
             player_id=player_id,
             player_name=player_name,
             z_scores=player_z_scores,

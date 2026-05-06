@@ -24,20 +24,20 @@ def risk_raw_from_rows(season_rows: Iterable, seasons: list[str] = LAST_5) -> fl
     - Missing seasons are ignored (rookies are NOT penalized)
     """
     # keep only rows in the last-5 window
-    rows = [r for r in season_rows if r.season in seasons]
+    rows = [r for r in season_rows if r.season in seasons] # this keeps only rows where the season is inside the chosen seasons list
 
     if not rows:
-        return 0.0
+        return 0.0 # handle no data
 
-    gp_sum = 0
+    gp_sum = 0 # set up totals
     possible_sum = 0
 
-    for r in rows:
+    for r in rows: # adds games played and possible games
         gp_sum += int(r.gp or 0)
         possible_sum += SEASON_POSSIBLE_GAMES.get(r.season, 82)
 
-    if possible_sum <= 0:
+    if possible_sum <= 0: # avoid invalid division if for some reason total possible games is 0 or -
         return 0.0
 
-    raw = gp_sum / possible_sum
-    return max(0.0, min(1.0, raw))
+    raw = gp_sum / possible_sum # calculates raw availability percentage
+    return max(0.0, min(1.0, raw)) # ensure it's between 0 and 1, just in case of bad data

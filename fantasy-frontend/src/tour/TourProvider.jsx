@@ -8,22 +8,22 @@ const TourContext = createContext(null);
 const PANEL_W = 340;
 const PADDING = 10;
 
-export function TourProvider({ children }) {
+export function TourProvider({ children }) { 
   const location = useLocation();
   const navigate = useNavigate();
 
   // Core tour state: whether the tour is open, which step is active, and where the
   // highlighted element currently sits on screen.
-  const [active, setActive] = useState(false);
-  const [stepIndex, setStepIndex] = useState(0);
-  const [steps, setSteps] = useState([]);
-  const [pendingPath, setPendingPath] = useState(null);
-  const [rect, setRect] = useState(null);
+  const [active, setActive] = useState(false);  // is the tour currently active/open?
+  const [stepIndex, setStepIndex] = useState(0); // which step of the tour is currently being shown?
+  const [steps, setSteps] = useState([]); // the list of steps for the current tour, which is determined by the current page route
+  const [pendingPath, setPendingPath] = useState(null); 
+  const [rect, setRect] = useState(null); 
   const [stepMissing, setStepMissing] = useState(false);
 
   const rafRef = useRef(null);
-  const currentPath = normalizeTourPath(location.pathname);
-  const currentSteps = tourByPath[currentPath] || [];
+  const currentPath = normalizeTourPath(location.pathname); 
+  const currentSteps = tourByPath[currentPath] || []; // the steps for the current page route
   const currentStep = active ? steps[stepIndex] : null;
 
   const hasTourForPath = (path) => !!(tourByPath[normalizeTourPath(path)] || []).length;
@@ -39,7 +39,7 @@ export function TourProvider({ children }) {
 
   const startForPath = (path) => { // runs when user starts a tour
     const normalized = normalizeTourPath(path); 
-    const nextSteps = tourByPath[normalized] || [];
+    const nextSteps = tourByPath[normalized] || []; 
     if (!nextSteps.length) return false;
 
     // If the requested tour belongs to another page, navigate there first and
@@ -90,10 +90,10 @@ export function TourProvider({ children }) {
       // Find the DOM element for the current step and measure it so the overlay
       // can draw a highlight box around it.
       const target = currentStep.selector
-        ? document.querySelector(currentStep.selector)
+        ? document.querySelector(currentStep.selector) // selects the element in the page that matches the selector defined in the current step of the tour
         : null;
 
-      if (!target) {
+      if (!target) { // If the target element can't be found, don't show a highlight box but still show the tooltip in case the step content is important.
         setRect(null);
         setStepMissing(!!currentStep.selector);
         return;
@@ -109,7 +109,7 @@ export function TourProvider({ children }) {
       setStepMissing(false);
 
       // Scroll the target into view so the highlighted element is visible before the user reads the tooltip.
-      if (typeof target.scrollIntoView === "function") {
+      if (typeof target.scrollIntoView === "function") { 
         target.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
       }
     };
@@ -197,14 +197,14 @@ export function TourProvider({ children }) {
             stepIndex={stepIndex}
             totalSteps={steps.length}
             tooltipStyle={tooltipStyle}
-            onPrev={() => setStepIndex((i) => Math.max(0, i - 1))}
+            onPrev={() => setStepIndex((i) => Math.max(0, i - 1))} // goes to previous step
             onNext={() =>
-              setStepIndex((i) => {
-                if (i >= steps.length - 1) {
+              setStepIndex((i) => { // goes to next step
+                if (i >= steps.length - 1) { // if it's the last step, calling "Next" will end the tour
                   stop();
                   return i;
                 }
-                return i + 1;
+                return i + 1; // otherwise, go to the next step
               })
             }
             onClose={stop}
@@ -274,7 +274,7 @@ function TourOverlay({
           </div>
         )}
 
-        <div style={overlayStyles.actions}>
+        <div style={overlayStyles.actions}> 
           <button type="button" onClick={onClose} style={overlayStyles.ghostBtn}>
             Skip
           </button>
@@ -308,7 +308,7 @@ const overlayStyles = {
     inset: 0,
     background: "rgba(3, 4, 8, 0.72)",
   },
-  highlight: {
+  highlight: { // the highlighted box around the target element
     position: "fixed",
     borderRadius: 14,
     border: "2px solid rgba(127,223,255,0.95)",

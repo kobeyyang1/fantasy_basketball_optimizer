@@ -17,26 +17,26 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const onSubmit = async (e) => {
+  const onSubmit = async (e) => { // handles the login form submission
     e.preventDefault();
     setError("");
-    setBusy(true);
+    setBusy(true); // sets the busy state to true to disable the form and show a loading state on the button
 
     try {
-      const res = await login(email.trim(), password);
+      const res = await login(email.trim(), password); // calls the login API with the email and password, which returns a token if successful
       const token = res.data?.access_token || res.data?.token;
 
       if (!token) {
-        throw new Error("No token returned from backend");
+        throw new Error("No token returned from backend"); // if the response doesn't contain a token, throw an error
       }
 
-      tokenStore.set(token);
+      tokenStore.set(token); // saves the token in local storage for future authenticated API calls
       nav(redirectTo, { replace: true });
-    } catch (err) {
+    } catch (err) { // if there's an error during login (network error, invalid credentials, etc), log the error and show a generic error message to the user
       console.error(err);
       setError("Login failed. Check your email/password.");
     } finally {
-      setBusy(false);
+      setBusy(false); // sets the busy state back to false to re-enable the form and hide the loading state on the button
     }
   };
 

@@ -13,14 +13,14 @@ const LABELS = [
   ["turnovers", "TOV"],
 ];
 
-export default function PuntSelector({ value = [], onChange }) {
+export default function PuntSelector({ value = [], onChange }) { // ui component for selecting which categories to punt
   const selected = new Set(value);
 
-  const toggle = (key) => {
-    const next = new Set(selected);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    onChange?.(Array.from(next));
+  const toggle = (key) => { // toggle a category on or off
+    const next = new Set(selected); // create a new set to trigger re-render
+    if (next.has(key)) next.delete(key); // if already selected, unselect it; otherwise, select it
+    else next.add(key); // toggle selection
+    onChange?.(Array.from(next)); // call onChange with the new selection as an array
   };
 
   return (

@@ -74,7 +74,7 @@ export default function NavBar() {
             </NavLink>
           )}
 
-          <button
+          <button // The "Tour" button on the right side of navbar
             type="button"
             onClick={startCurrentTour}
             disabled={!hasCurrentTour}

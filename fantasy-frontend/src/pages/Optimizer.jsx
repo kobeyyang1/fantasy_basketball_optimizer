@@ -42,13 +42,13 @@ function snakePick(leagueSize, draftSlot1Indexed, round1Indexed) {
   return r * n - slot + 1;
 }
 
-// Probability player is still there at your pick, given their overall “rank”.
+// Probability that player is still there at your pick, given their overall “rank”.
 // Higher rank number = later pick = more likely available.
 function availabilityProb(rank, pick) {
-  // rank smaller = earlier pick (harder to still be available later)
-  const softness = 7;
-  const x = (rank - pick) / softness;
-  return 1 / (1 + Math.exp(-x));
+  // smaller rank = earlier pick (harder to still be available later)
+  const softness = 7; // controls how quickly availability drops as rank gets worse than pick; smaller softness = sharper drop-off, larger softness = more gradual drop-off.
+  const x = (rank - pick) / softness; // normalize the difference between rank and pick by softness to control the steepness of the curve
+  return 1 / (1 + Math.exp(-x)); //convert normalized difference to a probability
 }
 
 function normalizePos(pos) {
@@ -92,50 +92,50 @@ function canFillSlot(playerEligible, slot) {
   return playerEligible.includes(slot);
 }
 
-function weightForCat(cat, focusCats, puntCats) {
+function weightForCat(cat, focusCats, puntCats) { // adjusts category weights
   if (puntCats.includes(cat)) return 0;
   if (focusCats.includes(cat)) return 1.8; // stronger focus influence
   return 1.0;
 }
 
 // ---------------- targets + diminishing returns ----------------
-function buildTargets({ focusCats, puntCats }) {
+function buildTargets({ focusCats, puntCats }) { // sets category targets based on focus and punt selections; focus cats have higher targets, punt cats are set to 0
   const targets = {};
-  for (const cat of ALL_CATS) {
-    if (puntCats.includes(cat)) {
+  for (const cat of ALL_CATS) { // iterate through all categories to build target thresholds
+    if (puntCats.includes(cat)) { // if category is punted, set target to 0 so it doesn't influence scoring
       targets[cat] = 0;
       continue;
     }
-    targets[cat] = focusCats.includes(cat) ? 4.5 : 2.2;
+    targets[cat] = focusCats.includes(cat) ? 4.5 : 2.2; // focus categories have higher targets (4.5) to encourage the optimizer to build around them, while non-focus categories have lower targets (2.2) that still contribute but are easier to "win"
   }
   return targets;
 }
 
-function progressTowardTarget(teamZ, targetZ) {
-  if (targetZ <= 0) return 0;
-  const x = teamZ / targetZ;
+function progressTowardTarget(teamZ, targetZ) { // calculates progress toward a category target with diminishing returns
+  if (targetZ <= 0) return 0; 
+  const x = teamZ / targetZ; // progress is linear up to the target, but we clamp it between 0 and 1 to reflect that contributions beyond the target have no additional value (diminishing returns). This encourages the optimizer to diversify category contributions rather than piling too much into one category.
   if (x <= 0) return 0;
   if (x >= 1) return 1;
   return x;
 }
 
 function marginalCategoryGain({ teamZByCat, candZByCat, targets, focusCats, puntCats }) {
-  let gain = 0;
+  let gain = 0; // calculate marginal gain in category progress from adding a player, weighted by category importance (focus/punt)
 
-  for (const cat of ALL_CATS) {
-    const w = weightForCat(cat, focusCats, puntCats);
+  for (const cat of ALL_CATS) { // iterate through all categories to calculate gain
+    const w = weightForCat(cat, focusCats, puntCats); // get weight for category based on focus/punt
     if (w === 0) continue;
 
-    const t = targets[cat] ?? 0;
-    if (t <= 0) continue;
+    const t = targets[cat] ?? 0; // if target is 0 (either punted or default), skip since it doesn't contribute to gain
+    if (t <= 0) continue; // skip categories with no target
 
-    const before = teamZByCat[cat] ?? 0;
-    const dz = candZByCat[cat] ?? 0;
+    const before = teamZByCat[cat] ?? 0; // current team z in this category before adding the player
+    const dz = candZByCat[cat] ?? 0; // candidate player's z contribution in this category; if null/undefined, treat as 0
 
-    const p0 = progressTowardTarget(before, t);
-    const p1 = progressTowardTarget(before + dz, t);
+    const p0 = progressTowardTarget(before, t); // progress toward target before adding player
+    const p1 = progressTowardTarget(before + dz, t); // progress toward target after adding player
 
-    gain += w * (p1 - p0);
+    gain += w * (p1 - p0); // marginal gain in progress toward target, weighted by category importance; this encourages the optimizer to value players who contribute more to focus categories and less to punt categories, while also considering diminishing returns as you get closer to targets
   }
 
   return gain;
@@ -178,27 +178,27 @@ function scoreCandidate({
     puntCats,
   });
 
-  const prob = availabilityProb(rank, pick);
+  const prob = availabilityProb(rank, pick); // if the player is very unlikely to be available, we give them a score of -Infinity to effectively remove them from consideration
   if (prob < 0.22) return { score: -Infinity, prob, catGain };
 
-  const probNext = nextPick ? availabilityProb(rank, nextPick) : 0;
-  const urgency = clamp(prob - probNext, 0, 1);
+  const probNext = nextPick ? availabilityProb(rank, nextPick) : 0; // probability at next pick
+  const urgency = clamp(prob - probNext, 0, 1); // urgency to pick this player now rather than later; if prob is much higher than probNext, it means the player likely won't be available at next pick, so urgency is high
   const valueDelta = pick - rank; // positive = value, negative = reach
-  const reachPenalty = valueDelta < -2 ? Math.abs(valueDelta + 2) / 18 : 0;
-  const valueBonus = valueDelta > 0 ? Math.min(valueDelta / 22, 1.2) : 0;
-  const rawValue = num(combinedScore) ?? 0;
-  const dur = num(riskRaw) ?? 0;
+  const reachPenalty = valueDelta < -2 ? Math.abs(valueDelta + 2) / 18 : 0; // penalize players who are ranked much higher than the current pick (i.e., reaches), with a buffer of 2 picks where there's no penalty, and then increasing penalty as you reach more and more for a player who is unlikely to be available.
+  const valueBonus = valueDelta > 0 ? Math.min(valueDelta / 22, 1.2) : 0; // bonus for value picks, capped at 1.2 for players who are ranked much lower than the current pick (i.e., steals), with a scaling factor of 22 to control how quickly the bonus increases.
+  const rawValue = num(combinedScore) ?? 0; // use combined_score from backend as a tiebreaker for players with similar category gain, since it incorporates overall player value and risk into a single metric based on the backend's model. This allows the optimizer to prefer players who not only fit the category needs but also have strong overall profiles according to the backend's analysis.
+  const dur = num(riskRaw) ?? 0; // durability/risk metric from backend; lower risk (higher durability) should increase score, but we treat it as a nudge rather than a dominant factor since it's less directly related to category needs and more about overall player reliability.
 
-  let antiOverstack = 0;
+  let antiOverstack = 0; // protection against overstacking categories that are already close to target
   for (const cat of ALL_CATS) {
-    if (puntCats.includes(cat)) continue;
+    if (puntCats.includes(cat)) continue; // skip punt categories since they don't contribute to targets and we don't want them to influence overstacking penalties
     const t = targets[cat] ?? 0;
     if (t <= 0) continue;
 
-    const prog = progressTowardTarget(teamZByCat[cat] ?? 0, t);
-    if (prog >= 0.85) {
-      const dz = candZByCat[cat] ?? 0;
-      if (dz > 0) antiOverstack += 0.06 * dz;
+    const prog = progressTowardTarget(teamZByCat[cat] ?? 0, t); // how close we are to the target in this category before adding the player
+    if (prog >= 0.85) { // if we're already close to the target (prog >= 0.85), we start applying an overstacking penalty for adding more players who contribute to this category, since it has diminishing returns and we want to encourage more balanced builds.
+      const dz = candZByCat[cat] ?? 0; // The penalty is proportional to how much the candidate contributes to this category (dz) and only applies if dz > 0 (i.e., the player would push us closer to or beyond the target).
+      if (dz > 0) antiOverstack += 0.06 * dz; // the 0.06 factor controls how harsh the penalty is for overstacking; this encourages the optimizer to diversify category contributions rather than piling too much into categories that are already close to their targets, which can lead to more well-rounded lineups.
     }
   }
 
@@ -248,15 +248,15 @@ function buildLineup({
   // ---------- Locks consume early rounds ----------
   // Lock #1 = Round 1 pick, Lock #2 = Round 2 pick, etc.
   lockedIds.forEach((id, i) => {
-    const s = statsById.get(id);
-    const r = rankRowById.get(id);
-    if (!s || !r) return;
+    const s = statsById.get(id); // need stats for position eligibility
+    const r = rankRowById.get(id); // need ranking for name and availability
+    if (!s || !r) return; // if we don't have stats or ranking info for a locked player, we skip them (they won't be included in the lineup)
 
-    const round = i + 1;
-    const overall = snakePick(leagueSize, draftSlot, round);
+    const round = i + 1; // assign locks to the earliest rounds
+    const overall = snakePick(leagueSize, draftSlot, round); // calculate overall pick number for this lock based on its assigned round
 
-    chosen.push({
-      round,
+    chosen.push({ // add lock to Chosen list
+      round, 
       overall,
       player_id: id,
       name: r.player_name,
@@ -273,16 +273,16 @@ function buildLineup({
     usedIds.add(id);
   });
 
-  // slots remaining and assign slots for locks first
-  const slotsRemaining = [...slots];
-  for (const pick of chosen) {
-    const eligible = normalizePos(pick.pos);
-    const idx = slotsRemaining.findIndex((slot) => canFillSlot(eligible, slot));
-    if (idx >= 0) {
-      pick.slot = slotsRemaining[idx];
-      slotsRemaining.splice(idx, 1);
-    } else {
-      pick.slot = "UTIL";
+  
+  const slotsRemaining = [...slots]; // create a mutable copy of slots to track which roster slots are still open as we assign locks and draft players.
+  for (const pick of chosen) { // assign locked players to their appropriate slots based on their position eligibility, prioritizing non-UTIL slots first.
+    const eligible = normalizePos(pick.pos); 
+    const idx = slotsRemaining.findIndex((slot) => canFillSlot(eligible, slot)); // find the first available slot that the player can fill
+    if (idx >= 0) { // if we found an eligible slot
+      pick.slot = slotsRemaining[idx]; // assign the player to that slot
+      slotsRemaining.splice(idx, 1); // remove that slot from the remaining slots since it's now filled
+    } else { // if no eligible non-UTIL slot is available
+      pick.slot = "UTIL"; // assign the player to a UTIL slot
     }
   }
 
@@ -308,8 +308,8 @@ function buildLineup({
       const eligible = normalizePos(s.position);
       if (!slotsRemaining.some((slot) => canFillSlot(eligible, slot))) continue;
 
-      const rank = rankMap.get(id) ?? 9999;
-      const prob = availabilityProb(rank, overall);
+      const rank = rankMap.get(id) ?? 9999; // get the overall rank of the player; if not found, assign a very high rank to indicate low availability (this can happen if the player is new or has limited data)
+      const prob = availabilityProb(rank, overall); // calculate the probability that this player will still be available at the current pick based on their rank
 
       // only filter truly impossible picks; allow some risk
       if (prob < 0.15) continue;
@@ -342,24 +342,24 @@ function buildLineup({
     if (!evaluated.length) continue;
 
     evaluated.sort((a, b) => { // second option logic
-      if (b.buildScore !== a.buildScore) return b.buildScore - a.buildScore;
+      if (b.buildScore !== a.buildScore) return b.buildScore - a.buildScore; // if buildScore (category fit) differs, prioritize higher buildScore since it better reflects category fit and overall value; this ensures that the optimizer's top pick is not only a good fit for the team's needs but also has a strong overall profile according to the backend's model.
       return b.score - a.score;
     });
-    const best = evaluated[0];
+    const best = evaluated[0]; // best candidate based on overall score, with buildScore as tiebreaker
 
-    let second = null;
-    const safer = evaluated.filter((e) => e.r.player_id !== best.r.player_id && e.prob > best.prob + 0.08); //alternative player must have > 0.08 availability probability than the best player
-    if (safer.length) {
-      safer.sort((a, b) => {
-        if (b.buildScore !== a.buildScore) return b.buildScore - a.buildScore;
+    let second = null; // look for a safer alternative
+    const safer = evaluated.filter((e) => e.r.player_id !== best.r.player_id && e.prob > best.prob + 0.08); // alternative player must have > 0.08 availability probability than the best player
+    if (safer.length) { // if we have safer alternatives, pick the one with the highest buildScore (best category fit) as the second option
+      safer.sort((a, b) => { // among safer alternatives, prioritize buildScore first
+        if (b.buildScore !== a.buildScore) return b.buildScore - a.buildScore; // if buildScore differs, prioritize higher buildScore since it better reflects category fit and overall value; this ensures that the second option is not only safer but also has a strong overall profile according to the backend's model.
         return b.prob - a.prob;
       });
       second = safer[0];
-    } else {
+    } else { // if no safer alternatives, just pick the next best option by score as the second option, even if it's not much safer, to at least provide some alternative for the user to consider.
       const byProb = evaluated
-        .filter((e) => e.r.player_id !== best.r.player_id)
-        .sort((a, b) => b.prob - a.prob || b.buildScore - a.buildScore);
-      if (byProb.length) second = byProb[0];
+        .filter((e) => e.r.player_id !== best.r.player_id) 
+        .sort((a, b) => b.prob - a.prob || b.buildScore - a.buildScore); // sort by probability first, then by buildScore as tiebreaker
+      if (byProb.length) second = byProb[0]; // pick the most available alternative as the second option
     }
 
     const eligible = normalizePos(best.s.position);
@@ -407,15 +407,15 @@ export default function Optimizer() {
   const { season, setSeason, seasons } = useSeason();
   const { league, loading: loadingLeague } = useLeagueStats(); // still used for UI/loading gating
 
-  const [leagueSize, setLeagueSize] = useState(12);
+  const [leagueSize, setLeagueSize] = useState(12); // optimizer parameters
   const [draftSlot, setDraftSlot] = useState(2);
   const [rounds, setRounds] = useState(DEFAULT_ROUNDS);
 
-  const [focusCats, setFocusCats] = useState(["assists", "three_pm", "steals", "ft_pct"]);
-  const [puntCats, setPuntCats] = useState(["turnovers"]);
+  const [focusCats, setFocusCats] = useState(["assists", "three_pm", "steals", "ft_pct"]); // default focus categories that the optimizer will try to build around; can be customized by the user
+  const [puntCats, setPuntCats] = useState(["turnovers"]); // default punt categories that the optimizer will ignore; can be customized by the user
 
   const [allPlayers, setAllPlayers] = useState([]);
-  const [lockedIds, setLockedIds] = useState([]);
+  const [lockedIds, setLockedIds] = useState([]); // locked players stored here
 
   const [rankings, setRankings] = useState([]);
   const [statsById, setStatsById] = useState(new Map());
@@ -509,25 +509,25 @@ export default function Optimizer() {
 
   const disabledIds = useMemo(() => new Set(lockedIds), [lockedIds]);
 
-  const addLockById = (id) => {
+  const addLockById = (id) => { // adds a player to Locks by their ID
     if (!id) return;
     setLockedIds((prev) => {
-      if (prev.includes(id)) return prev;
-      if (prev.length >= 3) return prev;
-      return [...prev, id];
+      if (prev.includes(id)) return prev; // ensure no duplicates
+      if (prev.length >= 3) return prev; // enforce max of 3 locks
+      return [...prev, id]; // add new lock to the list
     });
     setLockQuery("");
   };
 
-  const removeLock = (id) => setLockedIds((prev) => prev.filter((x) => x !== id));
+  const removeLock = (id) => setLockedIds((prev) => prev.filter((x) => x !== id)); // removes a player from Locks by their ID
 
-  const lockResults = useMemo(() => {
-    const q = lockQuery.trim().toLowerCase();
+  const lockResults = useMemo(() => {  // search for locks from all players, excluding already locked players
+    const q = lockQuery.trim().toLowerCase(); // if query is empty, return empty results; only show results when there's a search term
     if (!q) return [];
     return allPlayers
-      .filter((p) => !disabledIds.has(p.id))
-      .filter((p) => (p.name || "").toLowerCase().includes(q))
-      .slice(0, 8);
+      .filter((p) => !disabledIds.has(p.id)) // exclude already locked players from search results
+      .filter((p) => (p.name || "").toLowerCase().includes(q)) // filter players whose names include the search query (case-insensitive)
+      .slice(0, 8); // limit to top 8 results
   }, [lockQuery, allPlayers, disabledIds]);
 
   const generateLineups = () => {
@@ -537,7 +537,7 @@ export default function Optimizer() {
       return;
     }
 
-    const lineup = buildLineup({
+    const lineup = buildLineup({ // once user picks focus and punt cats, the 2 arrays are passed into lineup generation.
       leagueSize,
       draftSlot,
       rounds,
@@ -716,7 +716,7 @@ export default function Optimizer() {
         )}
       </div>
 
-      <div data-tour="optimizer-focus" style={{ marginTop: 14 }}>
+      <div data-tour="optimizer-focus" style={{ marginTop: 14 }}> // Focus + punt: how the optimizer scores candidates
         <h3>Focus categories</h3>
         <div style={{ color: "#aaa", marginBottom: 8 }}>
           Focus cats have higher target thresholds (the build actively tries to “win” them).

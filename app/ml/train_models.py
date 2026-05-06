@@ -23,7 +23,7 @@ from app.services.roto_scoring import compute_roto_scores
 # 1. Build training dataset
 # -----------------------------
 
-FEATURE_COLS = [
+FEATURE_COLS = [ # Random Forest set up
     "fg_pct",
     "ft_pct",
     "three_pm",
@@ -48,7 +48,7 @@ def build_training_dataframe(db: Session) -> pd.DataFrame:
 
     players = db.query(Player).all() # pulls players and stats from database
     for p in players:
-        stats: PlayerStats | None = p.stats
+        stats: PlayerStats | None = p.stats # gets the stats for each player, if they exist. If not, skip this player since we can't train on them without features.
         if not stats:
             continue
 
@@ -67,7 +67,7 @@ def build_training_dataframe(db: Session) -> pd.DataFrame:
         }
         rows.append(row)
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows) # creates a dataframe from the list of player rows
 
     # Drop any rows with missing feature values
     df = df.dropna(subset=FEATURE_COLS)
@@ -94,9 +94,9 @@ def build_training_dataframe(db: Session) -> pd.DataFrame:
             }
         )
 
-    results = compute_roto_scores(
-        players=players_for_roto,
-        categories=FEATURE_COLS,
+    results = compute_roto_scores( # computes roto scores for each player using the existing roto engine, which will be used as the target variable for training
+        players=players_for_roto, # the input to the roto engine is a list of player dicts with their stats
+        categories=FEATURE_COLS, 
         inverted_categories=["turnovers"],
     )
 

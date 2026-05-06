@@ -6,7 +6,7 @@ from typing import List, Dict
 
 # Interview: Convert a list of numbers into z-scores (mean 0, std 1).
 def z_score(values: List[float]) -> List[float]:
-    if not values:
+    if not values: # handles empty input
         return []
 
     mean = sum(values) / len(values)
@@ -14,15 +14,15 @@ def z_score(values: List[float]) -> List[float]:
     std = math.sqrt(variance)
 
     if std == 0:
-        return [0.0 for _ in values]
+        return [0.0 for _ in values] # avoids division by zero if all values are the same
 
     return [(v - mean) / std for v in values]
 
 
 # Interview: Attach risk z-scores to each player dict in-place.
 def attach_risk_z(players: List[Dict]) -> None:
-    risk_vals = [p["risk_raw"] for p in players]
-    z_vals = z_score(risk_vals)
+    risk_vals = [p["risk_raw"] for p in players] # extract raw risk values from player dicts
+    z_vals = z_score(risk_vals) # converts raw risk values to z-scores
 
-    for p, z in zip(players, z_vals):
-        p["risk_z"] = float(z)
+    for p, z in zip(players, z_vals): 
+        p["risk_z"] = float(z) # attaches the z-scores back to the player dicts under the key "risk_z"

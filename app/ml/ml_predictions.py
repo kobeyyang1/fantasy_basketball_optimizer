@@ -137,22 +137,22 @@ def predict_roto_scores_with_rf(db: Session, season: str = DEFAULT_SEASON) -> Li
     return results
 
 
-def explain_player_with_shap(db: Session, player_id: int, season: str = DEFAULT_SEASON) -> Dict:
-    df = build_feature_dataframe_for_season(db, season)
+def explain_player_with_shap(db: Session, player_id: int, season: str = DEFAULT_SEASON) -> Dict: # SHAP calculation
+    df = build_feature_dataframe_for_season(db, season) # creates a dataframe containing the ML input data for all players in that season
 
-    row = df[df["player_id"] == player_id]
+    row = df[df["player_id"] == player_id] # selects the requested player
     if row.empty:
         raise ValueError("Player not found in ML feature set for this season.")
 
-    model = load_rf_model()
+    model = load_rf_model() # load trained model
 
-    X_sample = row[FEATURE_COLS]
-    ml_score = float(model.predict(X_sample)[0])
+    X_sample = row[FEATURE_COLS] # select the feature columns for the player to use as input for the SHAP calculation
+    ml_score = float(model.predict(X_sample)[0]) # get the predicted ML score for the player using the model, which will be explained by SHAP
 
-    explainer = shap.TreeExplainer(model)
-    shap_values = explainer(X_sample)
+    explainer = shap.TreeExplainer(model) # create a SHAP explainer object for the model, which will be used to calculate the SHAP values for the player's features
+    shap_values = explainer(X_sample) # calculate the SHAP values for the player's features
 
-    base_raw = getattr(shap_values, "base_values", explainer.expected_value)
+    base_raw = getattr(shap_values, "base_values", explainer.expected_value) # get the base value (expected value) from the SHAP explainer
     try:
         base_value = float(base_raw[0])
     except (TypeError, IndexError):
@@ -160,7 +160,7 @@ def explain_player_with_shap(db: Session, player_id: int, season: str = DEFAULT_
 
     values = shap_values.values[0]
 
-    impacts: List[Dict] = []
+    impacts: List[Dict] = [] # build a list of feature impacts
     for feat, shap_val in zip(FEATURE_COLS, values):
         impacts.append(
             {
@@ -171,7 +171,7 @@ def explain_player_with_shap(db: Session, player_id: int, season: str = DEFAULT_
             }
         )
 
-    impacts.sort(key=lambda d: d["abs_shap_value"], reverse=True)
+    impacts.sort(key=lambda d: d["abs_shap_value"], reverse=True) # sorts features by importance
 
     return {
         "player_id": int(row["player_id"].iloc[0]),

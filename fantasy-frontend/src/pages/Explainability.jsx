@@ -120,11 +120,11 @@ export default function Explainability() {
     setVisibleCount(50);
   }, [query, season]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+  const filtered = useMemo(() => { 
+    const q = query.trim().toLowerCase(); // filter by player name
     if (!q) return players;
     return players.filter((p) =>
-      (p.player_name || "").toLowerCase().includes(q)
+      (p.player_name || "").toLowerCase().includes(q) // handle missing names gracefully
     );
   }, [players, query]);
 

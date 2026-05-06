@@ -1205,7 +1205,7 @@ def get_ml_rankings(
     return results[:limit]
 
 # Interview: Return SHAP explainability for one player.
-@router.get("/ml_explain/{player_id}", response_model=PlayerMLExplainOut)
+@router.get("/ml_explain/{player_id}", response_model=PlayerMLExplainOut) # api endpoint to get SHAP explainability for a player
 def get_ml_explain(
     player_id: int,
     season: str = "2025-26",

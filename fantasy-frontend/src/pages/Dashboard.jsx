@@ -57,17 +57,17 @@ const fmt2 = (v) => {
 };
 
 // cell coloring
-const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+const clamp = (n, a, b) => Math.max(a, Math.min(b, n)); // helper to clamp a number between a and b; ensures that the value used for coloring doesn't exceed expected bounds, which could lead to overly strong colors. 
 
-function bgFromZ(z, invert = false) {
+function bgFromZ(z, invert = false) { // returns a background color style based on the z-score, with green for good and red for bad. Invert is used for stats where lower is better (like turnovers).
   if (z === null || z === undefined || Number.isNaN(z)) {
     return { backgroundColor: "rgba(255,255,255,0.02)", color: "#e6edf3" };
   }
-  const val = invert ? -z : z;
+  const val = invert ? -z : z; // if invert is true, we flip the z-score so that higher values get colored as bad (red).
   const t = clamp(Math.abs(val) / 2.25, 0, 1);
   const alpha = 0.08 + t * 0.50; // controls how strong the coloring is at different z-scores. 2.25 is ~99th percentile in a normal distribution, so that and above get the max alpha.
 
-  const good = "34,197,94";
+  const good = "34,197,94"; 
   const bad = "239,68,68";
   const rgb = val >= 0 ? good : bad; // positive (green) vs negative (red)
 
@@ -138,19 +138,19 @@ export default function Dashboard() {
   }, [rankings]);
 
   // Search function
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return rankings || [];
+  const filtered = useMemo(() => { // uses React's useMemo to efficiently compute the filtered list of players based on the search query, rankings, and statsById. It only recomputes when one of these dependencies changes.
+    const q = search.trim().toLowerCase(); // lowercase search for case-insensitive matching
+    if (!q) return rankings || []; // if search is empty, show all
 
-    return (rankings || []).filter((r) => {
-      const pid = Number(r.player_id);
-      const row = statsById.get(pid);
+    return (rankings || []).filter((r) => { // loops through rankings and keeps only matches, each r is one ranking row/player
+      const pid = Number(r.player_id); // get player ID from the ranking row
+      const row = statsById.get(pid); // get the corresponding stats row for that player ID
 
-      const name = String(r.player_name || "").toLowerCase();
-      const team = String(pick(row, ["team"], "") || "").toLowerCase();
+      const name = String(r.player_name || "").toLowerCase(); // prepare name, team, and position for matching
+      const team = String(pick(row, ["team"], "") || "").toLowerCase(); // || "" handles case where row might be missing or team is missing
       const pos = String(pick(row, ["position"], "") || "").toLowerCase();
 
-      return name.includes(q) || team.includes(q) || pos.includes(q);
+      return name.includes(q) || team.includes(q) || pos.includes(q); // keep this player if any of name, team, or position includes the search query
     });
   }, [rankings, search, statsById]);
 
@@ -159,7 +159,7 @@ export default function Dashboard() {
     [filtered, visibleCount]
   );
 
-  const canShowMore = visibleCount < (filtered?.length || 0);
+  const canShowMore = visibleCount < (filtered?.length || 0); // whether to show the "Show more" button, which is true if there are more filtered results than currently visible
 
   // league z-score: estimate from the FULL list you're working with
   const league = useMemo(() => {
@@ -260,7 +260,7 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div data-tour="dashboard-header">
+      <div data-tour="dashboard-header"> 
         <h2>Dashboard</h2>
         <p style={{ color: "rgba(255,255,255,0.75)" }}>
           Players by roto + availability. Showing {season} averages.

@@ -3,7 +3,7 @@ import axios from "axios";
 
 const TOKEN_KEY = "access_token";
 
-export const tokenStore = {
+export const tokenStore = { // a simple wrapper around localStorage to manage the auth token
   get() {
     return localStorage.getItem(TOKEN_KEY);
   },

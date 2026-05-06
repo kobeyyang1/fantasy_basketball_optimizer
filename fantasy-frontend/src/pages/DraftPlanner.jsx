@@ -10,7 +10,7 @@ import { loadJSON, saveJSON } from "../utils/storage";
 
 const STORAGE_KEY = "draftPlannerState_v1";
 const POSITIONS = ["All", "PG", "SG", "SF", "PF", "C", "G", "F"];
-const AI_PICK_DELAY_MS = 2000;
+const AI_PICK_DELAY_MS = 2000; // delay in milliseconds before the CPU manager makes its pick
 const MOCK_CATEGORIES = [
   "fg_pct",
   "ft_pct",
@@ -22,21 +22,21 @@ const MOCK_CATEGORIES = [
   "blocks",
   "turnovers",
 ];
-const CPU_DIFFICULTY_PRESETS = {
+const CPU_DIFFICULTY_PRESETS = { // CPU manager behavior presets
   normal: {
     label: "Normal",
-    shortlistRange: [3, 5],
-    topBias: 0.84,
-    scoreNoise: 0.3,
-    mistakeChance: 0.035,
-    strategyDiscipline: 0.98,
-    tunnelVisionChance: 0.025,
+    shortlistRange: [3, 5], // number of top candidates the CPU considers; 3 to 5 candidates
+    topBias: 0.84, // bias toward top candidates; higher means more likely to pick the top candidate, lower means more randomness among the shortlist
+    scoreNoise: 0.3, // random noise added to candidate scores to create variability in CPU picks; higher means more randomness
+    mistakeChance: 0.035, // chance that the CPU makes a "mistake" by picking a lower-ranked candidate outside of the shortlist; this simulates occasional suboptimal decisions
+    strategyDiscipline: 0.98, // how closely the CPU follows its strategic profile (focus/punt); higher means more discipline, lower means more randomness in following the strategy
+    tunnelVisionChance: 0.025, // chance that the CPU develops tunnel vision and overvalues a player who fits its focus categories but is overall a poor pick, leading to a significant score penalty; this simulates the risk of being too narrowly focused on certain categories.
   },
   hard: {
     label: "Hard",
     shortlistRange: [1, 1],
     topBias: 1,
-    scoreNoise: 0,
+    scoreNoise: 0, 
     mistakeChance: 0,
     strategyDiscipline: 1.04,
     tunnelVisionChance: 0,
@@ -46,11 +46,11 @@ const CPU_DIFFICULTY_PRESETS = {
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const selectOptionStyle = { backgroundColor: "#0f172a", color: "#f8fafc" };
 
-function snakeManagerSlot(leagueSize, overallPick) {
-  const round = Math.ceil(overallPick / leagueSize);
-  const pickInRound = ((overallPick - 1) % leagueSize) + 1;
-  if (round % 2 === 1) return pickInRound;
-  return leagueSize - pickInRound + 1;
+function snakeManagerSlot(leagueSize, overallPick) { // calculates which manager's turn it is based on the overall pick number and league size, following a snake draft order
+  const round = Math.ceil(overallPick / leagueSize); // calculate current round based on overall pick and league size
+  const pickInRound = ((overallPick - 1) % leagueSize) + 1; // calculate pick number within the current round (1-based index)
+  if (round % 2 === 1) return pickInRound; // if it's an odd round, the order is normal (1 to leagueSize)
+  return leagueSize - pickInRound + 1; // if it's an even round, the order is reversed
 }
 
 function shuffle(arr) {
@@ -238,16 +238,16 @@ function initTeamZ() {
   return out;
 }
 
-function sampleManagerStrategy() {
-  const pool = shuffle(MOCK_CATEGORIES);
-  const focusRoll = Math.random();
-  const focusCount = focusRoll < 0.18 ? 2 : focusRoll < 0.58 ? 3 : focusRoll < 0.88 ? 4 : 5;
-  const focusCats = pool.slice(0, focusCount);
-  const puntPool = pool.filter((c) => !focusCats.includes(c));
+function sampleManagerStrategy() { // randomly generates a strategic profile for a CPU manager, determining which categories they focus on and which they punt, creating variability in CPU behavior and draft strategies
+  const pool = shuffle(MOCK_CATEGORIES); // randomize the order of categories to ensure different focus/punt combinations across managers
+  const focusRoll = Math.random(); // determine how many categories the manager focuses on based on a random roll, creating variability in CPU strategies; some may focus on just a couple of categories while others may have a broader focus
+  const focusCount = focusRoll < 0.18 ? 2 : focusRoll < 0.58 ? 3 : focusRoll < 0.88 ? 4 : 5; // 18% chance to focus on 2 categories, 40% chance to focus on 3, 30% chance to focus on 4, and 12% chance to focus on 5 categories, creating a range of CPU manager strategies from very specialized to more balanced
+  const focusCats = pool.slice(0, focusCount); // select the focus categories from the shuffled pool based on the determined focus count
+  const puntPool = pool.filter((c) => !focusCats.includes(c)); // the remaining categories that are not focused on become the punt pool, which the manager will tend to avoid or devalue in their draft strategy
   const puntRoll = Math.random();
-  let puntCount = 0;
-  if (puntRoll > 0.52 && puntPool.length) puntCount = 1;
-  if (puntRoll > 0.84 && puntPool.length > 1) puntCount = 2;
+  let puntCount = 0; // determine how many categories the manager punts based on a random roll, creating variability in CPU strategies; some may not punt any categories while others may punt one or two, adding another layer of strategic diversity among CPU managers
+  if (puntRoll > 0.52 && puntPool.length) puntCount = 1; // 48% chance to punt at least one category, and if the punt pool is not empty, the manager will punt one category; if the roll is above 0.84 and there are enough categories in the punt pool, the manager will punt two categories, creating a range of CPU manager strategies from those that don't punt any categories to those that actively avoid multiple categories in their draft strategy
+  if (puntRoll > 0.84 && puntPool.length > 1) puntCount = 2; // if the random roll is above 0.84 and there are more than one category available in the punt pool, the manager will punt two categories, creating a more extreme strategic profile that heavily devalues certain categories in favor of their focused categories
   const puntCats = shuffle(puntPool).slice(0, puntCount);
   return { focusCats, puntCats };
 }
@@ -274,11 +274,11 @@ function sampleManagerProfile(difficulty) {
 }
 
 function createMockManagers({ leagueSize, userSlot, rounds, cpuDifficulty }) {
-  const rosterTemplate = makeMockRosterTemplate(rounds);
-  return Array.from({ length: leagueSize }, (_, idx) => {
-    const slot = idx + 1;
-    const strategy = sampleManagerStrategy();
-    const aiProfile = sampleManagerProfile(cpuDifficulty);
+  const rosterTemplate = makeMockRosterTemplate(rounds); // predefined roster slots based on number of rounds, ensuring enough UTIL slots for flexibility
+  return Array.from({ length: leagueSize }, (_, idx) => { // creates manager objects for each slot in the league
+    const slot = idx + 1; // assigns a unique slot number to each manager
+    const strategy = sampleManagerStrategy(); // randomly generates a strategic profile for the manager, determining which categories they focus on and which they punt
+    const aiProfile = sampleManagerProfile(cpuDifficulty); // generates an AI behavior profile based on the selected difficulty, influencing how the CPU manager evaluates players and makes picks
     return {
       slot,
       label: slot === userSlot ? `You (Pick ${slot})` : `Manager ${slot}`,
@@ -313,51 +313,51 @@ function cloneMockDraft(draft) {
 
 function currentTurnInfo(draft) { // calculates current turn
   if (!draft) return null;
-  const totalPicks = draft.leagueSize * draft.rounds;
-  if (draft.currentOverallPick > totalPicks) return null;
+  const totalPicks = draft.leagueSize * draft.rounds; // calculate total number of picks in the draft based on league size and number of rounds
+  if (draft.currentOverallPick > totalPicks) return null; // if the current overall pick exceeds the total number of picks, the draft is complete and there is no current turn
 
-  const overall = draft.currentOverallPick;
-  const round = Math.ceil(overall / draft.leagueSize);
-  const pickInRound = ((overall - 1) % draft.leagueSize) + 1;
-  const managerSlot = snakeManagerSlot(draft.leagueSize, overall);
+  const overall = draft.currentOverallPick; // the current overall pick number
+  const round = Math.ceil(overall / draft.leagueSize); // calculate the current round based on the overall pick and league size
+  const pickInRound = ((overall - 1) % draft.leagueSize) + 1; // calculate the pick number within the current round (1-based index)
+  const managerSlot = snakeManagerSlot(draft.leagueSize, overall); // determine which manager's turn it is based on the overall pick number and league size, following a snake draft order
 
-  return { overall, round, pickInRound, managerSlot };
+  return { overall, round, pickInRound, managerSlot }; 
 }
 
 function syncMockDraftTurnState(draft) { // decides draft status
-  const turn = currentTurnInfo(draft);
-  if (!turn) {
+  const turn = currentTurnInfo(draft); // get current turn information based on the draft's current overall pick, league size, and rounds to determine which manager's turn it is and what the current round and pick in round are
+  if (!turn) { // if there is no current turn (i.e., the draft is complete), update the draft status to "complete" and clear the current turn information
     draft.status = "complete";
     draft.currentTurn = null;
     return draft;
   }
 
-  draft.currentTurn = turn;
+  draft.currentTurn = turn; // if there is a current turn, update the draft's current turn information with the calculated turn details, including overall pick number, round, pick in round, and which manager's turn it is
   draft.status = turn.managerSlot === draft.userSlot ? "user_turn" : "running";
   return draft;
 }
 
-function applyPickToDraft(nextDraft, player, managerSlot, reason) {
-  const turn = currentTurnInfo(nextDraft);
-  if (!turn) return nextDraft;
+function applyPickToDraft(nextDraft, player, managerSlot, reason) { // applies a pick to the draft state by updating the relevant manager's roster
+  const turn = currentTurnInfo(nextDraft); // get current turn information to determine which manager is making the pick
+  if (!turn) return nextDraft; // if there is no current turn, return the draft state unchanged
 
-  const manager = nextDraft.managers.find((m) => m.slot === managerSlot);
-  if (!manager) return nextDraft;
+  const manager = nextDraft.managers.find((m) => m.slot === managerSlot); // find the manager object corresponding to the manager slot for the current turn, which will be updated with the new pick information
+  if (!manager) return nextDraft; // if the manager cannot be found (which should not happen if the draft state is consistent), return the draft state unchanged
 
-  const eligible = normalizePos(player.position);
-  const slotFit = findBestSlot(eligible, manager.slotsRemaining);
-  const assignedSlot = slotFit?.slot || "UTIL";
+  const eligible = normalizePos(player.position); // determine which roster slots the player is eligible for based on their position, which will be used to find the best slot for the player on the manager's roster
+  const slotFit = findBestSlot(eligible, manager.slotsRemaining); // find the best roster slot that the player can fill for the manager based on their eligibility and the manager's remaining roster slots; this determines where the player will be placed on the manager's roster and how well they fit the manager's needs
+  const assignedSlot = slotFit?.slot || "UTIL"; // the assigned slot for the player is based on the best fit found; if no suitable slot is found, the player is assigned to a UTIL slot, which can accommodate any position but does not provide the same positional value as a specific slot
 
-  if (slotFit && slotFit.index >= 0) {
+  if (slotFit && slotFit.index >= 0) { // if a suitable slot fit is found for the player, remove that slot from the manager's remaining slots to reflect that it has been filled by the new pick; this ensures that future picks will not consider that slot as available and helps maintain the integrity of the roster construction logic
     manager.slotsRemaining.splice(slotFit.index, 1);
-  } else if (manager.slotsRemaining.length) {
+  } else if (manager.slotsRemaining.length) { // if no suitable slot fit is found but the manager still has remaining slots, remove the first available slot from the manager's remaining slots to reflect that it has been filled by the new pick; this is a fallback mechanism to ensure that the manager's roster state remains consistent even if the player does not fit any specific slot, and it helps prevent issues with tracking available roster slots as the draft progresses
     manager.slotsRemaining.splice(0, 1);
   }
 
-  manager.rosterIds.push(player.player_id);
+  manager.rosterIds.push(player.player_id); // add the player's ID to the manager's roster IDs to keep track of which players are on the manager's team
   for (const cat of MOCK_CATEGORIES) {
     manager.teamZByCat[cat] =
-      Number(manager.teamZByCat[cat] ?? 0) + Number(player.z_scores?.[cat] ?? 0);
+      Number(manager.teamZByCat[cat] ?? 0) + Number(player.z_scores?.[cat] ?? 0); // update the manager's team Z-scores by category based on the Z-scores of the newly drafted player
   }
 
   nextDraft.picks.push({
@@ -379,56 +379,56 @@ function applyPickToDraft(nextDraft, player, managerSlot, reason) {
   return nextDraft;
 }
 
-function selectCpuPick({ draft, manager, players, takenSet }) {
-  const profile = manager.aiProfile || CPU_DIFFICULTY_PRESETS.normal;
-  const candidates = [];
+function selectCpuPick({ draft, manager, players, takenSet }) { // selects a pick for the CPU managers
+  const profile = manager.aiProfile || CPU_DIFFICULTY_PRESETS.normal; // get the CPU manager's behavior profile
+  const candidates = []; // initialize an array to hold potential player candidates
   let checked = 0;
 
-  for (let idx = 0; idx < players.length; idx += 1) {
-    const p = players[idx];
-    if (!p || takenSet.has(p.player_id)) continue;
+  for (let idx = 0; idx < players.length; idx += 1) { // iterate through the player rankings in order
+    const p = players[idx]; // get the player at the current index in the rankings
+    if (!p || takenSet.has(p.player_id)) continue; // if the player is already taken in the draft, skip to the next player
 
-    const eligible = normalizePos(p.position);
-    const slotFit = findBestSlot(eligible, manager.slotsRemaining);
+    const eligible = normalizePos(p.position); // determine which roster slots the player is eligible for based on their position
+    const slotFit = findBestSlot(eligible, manager.slotsRemaining); // find the best roster slot that the player can fill for the manager
     if (!slotFit) continue;
 
-    checked += 1;
-    const score = scoreCpuCandidate({
+    checked += 1; // increment the count of how many players have been checked as potential picks
+    const score = scoreCpuCandidate({ // calculate a score for the player as a potential pick for the CPU manager
       player: p,
-      manager,
+      manager, 
       rounds: draft.rounds,
       overallPick: draft.currentOverallPick,
       overallRank: idx + 1,
       slotFit,
     });
 
-    candidates.push({
+    candidates.push({ // add the player to the list of candidates along with their calculated score and other relevant information for decision-making
       player: p,
       score,
       overallRank: idx + 1,
       slotFit,
-      reason: `${slotFit.slot} fit, ${chooseTopStrengthLabel(p, manager)}`,
+      reason: `${slotFit.slot} fit, ${chooseTopStrengthLabel(p, manager)}`, // the reason for the pick is based on how well the player fits the manager's roster needs and their strongest category relative to the manager's focus
     });
 
-    if (checked >= 140 && candidates.length) break;
+    if (checked >= 70 && candidates.length) break; // 70 player threshold to limit how far down the rankings the CPU will evaluate
   }
 
   if (!candidates.length) return null;
 
-  candidates.sort((a, b) => b.score - a.score);
-  if (draft.cpuDifficulty === "hard") return candidates[0];
+  candidates.sort((a, b) => b.score - a.score); // sort the candidates by their calculated score in descending order, so that the highest-scoring candidates are at the top of the list
+  if (draft.cpuDifficulty === "hard") return candidates[0]; // if CPU difficulty is 'hard', always pick the highest ranking candidate
 
-  const [minShortlist, maxShortlist] = profile.shortlistRange || [4, 8];
-  const shortlistSize = clamp(randInt(minShortlist, maxShortlist), 1, candidates.length);
-  const shortlist = candidates.slice(0, shortlistSize);
-  const topBias = Number(profile.topBias ?? 0.72);
-  const mistakeChance = Number(profile.mistakeChance ?? 0.16);
+  const [minShortlist, maxShortlist] = profile.shortlistRange || [4, 8]; // determine the range for how many top candidates the CPU will consider based on their behavior profile
+  const shortlistSize = clamp(randInt(minShortlist, maxShortlist), 1, candidates.length); // randomly determine the size of the shortlist
+  const shortlist = candidates.slice(0, shortlistSize); // create the shortlist
+  const topBias = Number(profile.topBias ?? 0.72); // get the bias toward picking higher-ranked candidates
+  const mistakeChance = Number(profile.mistakeChance ?? 0.16); // get the chance that the CPU will make a "mistake" by picking a lower-ranked candidate outside of the shortlist
 
-  if (Math.random() < mistakeChance) {
-    const mistakePool = candidates.slice(0, clamp(shortlistSize + 4, 2, candidates.length));
+  if (Math.random() < mistakeChance) { // if the random roll is below the mistake chance threshold, the CPU will pick from a larger pool of candidates that includes some lower-ranked options outside of the shortlist, simulating occasional suboptimal decisions and adding variability to CPU behavior
+    const mistakePool = candidates.slice(0, clamp(shortlistSize + 4, 2, candidates.length)); // the mistake pool includes the shortlist plus a few additional candidates below it, creating a range of potential "mistake" picks that are still somewhat reasonable but not the top choices
     return chooseWeighted(
       mistakePool,
-      (candidate, idx) => 1 / Math.pow(idx + 1, Math.max(0.55, topBias))
+      (candidate, idx) => 1 / Math.pow(idx + 1, Math.max(0.55, topBias)) // the weighting for the mistake pool is less biased toward the top candidates compared to the shortlist, allowing for a higher likelihood of picking lower-ranked candidates when a "mistake" occurs, while still giving some preference to higher-ranked options
     );
   }
 
@@ -440,9 +440,9 @@ function selectCpuPick({ draft, manager, players, takenSet }) {
   );
 }
 
-function advanceMockDraftOneCpuPick(draft, players) {
-  const next = cloneMockDraft(draft);
-  const turn = currentTurnInfo(next);
+function advanceMockDraftOneCpuPick(draft, players) { // advances the mock draft by one pick for CPU managers
+  const next = cloneMockDraft(draft); // create a deep copy of the current draft state to modify for the next state, ensuring immutability of the draft state and allowing for proper state updates in React
+  const turn = currentTurnInfo(next); // calculate the current turn information based on the next draft state to determine which manager's turn it is and what the current round and pick in round are
   if (!turn) {
     next.status = "complete";
     next.currentTurn = null;
@@ -513,7 +513,7 @@ export default function DraftPlanner() {
     loadJSON(STORAGE_KEY, { draftedIds: [], myTeamIds: [], riskWeight: 0.25 }).myTeamIds
   );
 
-  const [mockLeagueSize, setMockLeagueSize] = useState(12);
+  const [mockLeagueSize, setMockLeagueSize] = useState(12); // mock draft settings
   const [mockRounds, setMockRounds] = useState(11);
   const [mockUserSlotMode, setMockUserSlotMode] = useState("manual");
   const [mockUserSlot, setMockUserSlot] = useState(1);
@@ -579,19 +579,19 @@ export default function DraftPlanner() {
   const draftedSet = useMemo(() => new Set(activeDraftedIds), [activeDraftedIds]);
   const myTeamSet = useMemo(() => new Set(activeMyTeamIds), [activeMyTeamIds]);
 
-  const availablePlayers = useMemo(() => {
+  const availablePlayers = useMemo(() => { // search and filter available players
     const q = query.trim().toLowerCase();
     return enrichedPlayers
-      .filter((p) => !draftedSet.has(Number(p.player_id)))
-      .filter((p) => (!q ? true : (p.player_name || "").toLowerCase().includes(q)))
+      .filter((p) => !draftedSet.has(Number(p.player_id))) // exclude drafted players
+      .filter((p) => (!q ? true : (p.player_name || "").toLowerCase().includes(q))) // filter by name
       .filter((p) => {
-        if (posFilter === "All") return true;
-        return String(p.position || "").toUpperCase().includes(posFilter);
+        if (posFilter === "All") return true; // filter by position
+        return String(p.position || "").toUpperCase().includes(posFilter); // handle missing positions gracefully
       });
   }, [enrichedPlayers, draftedSet, query, posFilter]);
 
-  const myTeam = useMemo(
-    () => activeMyTeamIds.map((id) => playerById.get(Number(id))).filter(Boolean),
+  const myTeam = useMemo( // get my team players
+    () => activeMyTeamIds.map((id) => playerById.get(Number(id))).filter(Boolean), // handle missing players gracefully
     [activeMyTeamIds, playerById]
   );
 
@@ -635,13 +635,13 @@ export default function DraftPlanner() {
     setMyTeamIds([]);
   };
 
-  const startMockDraft = () => { //start draft
+  const startMockDraft = () => { // start draft
     if (!enrichedPlayers.length) {
       alert("Rankings are still loading.");
       return;
     }
 
-    const userSlot =
+    const userSlot = 
       mockUserSlotMode === "random"
         ? Math.floor(Math.random() * mockLeagueSize) + 1
         : clamp(mockUserSlot, 1, mockLeagueSize);
@@ -755,12 +755,12 @@ export default function DraftPlanner() {
   };
 
   useEffect(() => { // timers for cpu picks
-    if (!mockDraft || mockDraft.status !== "running" || !enrichedPlayers.length) return undefined;
+    if (!mockDraft || mockDraft.status !== "running" || !enrichedPlayers.length) return undefined; // only set timer if mock draft is active and running, and player data is loaded
 
     const timer = window.setTimeout(() => {
-      setMockDraft((prev) => {
+      setMockDraft((prev) => { // advance the draft by one CPU pick after a delay, but first check if the draft is still running to avoid making picks if the user has already ended the draft or if the draft has completed
         if (!prev || prev.status !== "running") return prev;
-        return advanceMockDraftOneCpuPick(prev, enrichedPlayers);
+        return advanceMockDraftOneCpuPick(prev, enrichedPlayers); 
       });
     }, AI_PICK_DELAY_MS);
 
@@ -872,7 +872,7 @@ export default function DraftPlanner() {
       fontWeight: 700,
       whiteSpace: "nowrap",
     },
-    mockInfoGrid: {
+    mockInfoGrid: { 
       display: "grid",
       gridTemplateColumns: "1fr 1fr",
       gap: 10,
@@ -899,7 +899,7 @@ export default function DraftPlanner() {
       fontSize: 12,
       lineHeight: 1.4,
     },
-    statusPill: {
+    statusPill: { // status badge
       display: "inline-flex",
       alignItems: "center",
       gap: 6,
@@ -911,7 +911,7 @@ export default function DraftPlanner() {
       background: "rgba(255,255,255,0.04)",
       color: "#fff",
     },
-    turnHighlight: {
+    turnHighlight: { // highlight for current turn
       padding: "10px 12px",
       margin: 12,
       borderRadius: 12,
@@ -940,7 +940,7 @@ export default function DraftPlanner() {
       background: "rgba(255, 214, 102, 0.12)",
       boxShadow: "0 0 0 1px rgba(255, 214, 102, 0.18) inset",
     },
-    mockBoardShell: {
+    mockBoardShell: { // mock draft ui settings
       borderRadius: 18,
       border: "1px solid rgba(255,255,255,0.08)",
       background:
@@ -992,7 +992,7 @@ export default function DraftPlanner() {
       background: "rgba(255, 214, 102, 0.14)",
       boxShadow: "0 0 0 1px rgba(255, 214, 102, 0.18) inset",
     },
-    mockBoardCell: {
+    mockBoardCell: { // board cell settings
       minHeight: 110,
       borderRadius: 14,
       border: "1px solid rgba(255,255,255,0.08)",
@@ -1106,7 +1106,7 @@ export default function DraftPlanner() {
       fontWeight: 700,
       textDecoration: "underline",
     },
-    popupOverlay: {
+    popupOverlay: { // 'recent picks' popup overlay
       position: "fixed",
       inset: 0,
       zIndex: 9999,
